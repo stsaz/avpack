@@ -165,6 +165,12 @@ static inline const void* mp4read_track_info(mp4read *m, int index)
 	return &t->audio;
 }
 
+static inline void mp4read_track_activate(mp4read *m, int index)
+{
+	struct mp4read_track *t = (struct mp4read_track*)m->tracks.ptr;
+	m->curtrack = &t[index];
+}
+
 /** Get an absolute sample number */
 #define mp4read_cursample(m)  ((m)->cursample)
 
