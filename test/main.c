@@ -10,6 +10,7 @@ extern void test_caf();
 extern void test_mkv();
 extern void test_mp4();
 extern void test_ogg();
+extern void test_wav();
 
 struct test {
 	const char *name;
@@ -22,6 +23,7 @@ static const struct test atests[] = {
 	T(mkv),
 	T(mp4),
 	T(ogg),
+	T(wav),
 };
 #undef T
 
