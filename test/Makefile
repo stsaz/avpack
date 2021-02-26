@@ -56,6 +56,7 @@ ifeq ($(OS),win)
 endif
 OBJ := \
 	$(OUT_DIR)/avi.o \
+	$(OUT_DIR)/caf.o \
 	$(OUT_DIR)/main.o \
 	$(OUT_DIR)/mkv.o \
 	$(OUT_DIR)/mp4.o \
