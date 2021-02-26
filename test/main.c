@@ -5,6 +5,7 @@
 #include <test/test.h>
 #include <stdio.h>
 
+extern void test_mkv();
 extern void test_mp4();
 extern void test_ogg();
 
@@ -14,6 +15,7 @@ struct test {
 };
 #define T(nm) { #nm, &test_ ## nm }
 static const struct test atests[] = {
+	T(mkv),
 	T(mp4),
 	T(ogg),
 };
