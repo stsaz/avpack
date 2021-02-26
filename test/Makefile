@@ -55,6 +55,7 @@ ifeq ($(OS),win)
 	TESTER := $(OUT_DIR)/avpack-test.exe
 endif
 OBJ := \
+	$(OUT_DIR)/avi.o \
 	$(OUT_DIR)/main.o \
 	$(OUT_DIR)/mkv.o \
 	$(OUT_DIR)/mp4.o \
