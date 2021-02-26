@@ -14,9 +14,14 @@ avpack code is header-only (`.h`-only) and doesn't need to be built into `.a/.so
 * read/write meta tags, audio track info
 * read/write audio frames
 * convenient for asynchronous I/O model (no I/O callback functions)
-* .mp4/.m4a/.mov read/write (`avpack/mp4read.h`, `avpack/mp4write.h`)
+* .avi read: `avpack/avi-read.h`
+* .caf read: `avpack/caf-read.h`
+* .mkv read: `avpack/mkv-read.h`
+* .mp4/.m4a/.mov read/write: `avpack/mp4-read.h`, `avpack/mp4-write.h`
+* .ogg/.opus read/write: `avpack/ogg-read.h`, `avpack/ogg-write.h`
+* .wav read/write: `avpack/wav-read.h`, `avpack/wav-write.h`
 
-It doesn't contain code that reads or writes files - this is the responsibility of the user.
+It doesn't contain code that reads or writes files - this is user's responsibility.
 
 
 ## How to use
@@ -35,7 +40,7 @@ and `AVPACK_DIR` is your avpack/ directory.
 
 3. And then just use the necessary files:
 
-		#include <avpack/mp4read.h>
+		#include <avpack/mp4-read.h>
 
 
 ## Test
