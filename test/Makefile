@@ -59,6 +59,7 @@ endif
 OBJ := \
 	$(OUT_DIR)/main.o \
 	$(OUT_DIR)/mp4.o \
+	$(OUT_DIR)/ogg.o \
 	$(OUT_DIR)/compat.o
 
 all: $(TESTER)

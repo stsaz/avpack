@@ -6,6 +6,7 @@
 #include <stdio.h>
 
 extern void test_mp4();
+extern void test_ogg();
 
 struct test {
 	const char *name;
@@ -14,6 +15,7 @@ struct test {
 #define T(nm) { #nm, &test_ ## nm }
 static const struct test atests[] = {
 	T(mp4),
+	T(ogg),
 };
 #undef T
 
