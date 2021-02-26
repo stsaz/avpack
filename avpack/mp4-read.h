@@ -38,7 +38,7 @@ typedef void (*mp4_log_t)(void *udata, ffstr msg);
 
 struct mp4read_audio_info {
 	ffuint type; // 0:video  1:audio
-	ffuint codec; // enum FFMP4_CODEC
+	ffuint codec; // enum MP4_CODEC
 	const char *codec_name;
 	struct mp4_aformat format;
 	ffuint64 total_samples;
@@ -52,7 +52,7 @@ struct mp4read_audio_info {
 
 struct mp4read_video_info {
 	ffuint type; // 0:video  1:audio
-	ffuint codec; // enum FFMP4_CODEC
+	ffuint codec; // enum MP4_CODEC
 	const char *codec_name;
 	ffuint width, height;
 };
@@ -119,12 +119,12 @@ static inline void _mp4read_log(mp4read *m, const char *fmt, ...)
 	ffstr_free(&s);
 }
 
-enum FFMP4_CODEC {
-	FFMP4_ALAC = 1,
-	FFMP4_AAC,
-	FFMP4_MPEG1,
+enum MP4_CODEC {
+	MP4_A_ALAC = 1,
+	MP4_A_AAC,
+	MP4_A_MPEG1,
 
-	FFMP4_V_AVC1,
+	MP4_V_AVC1,
 };
 
 enum MP4READ_R {
@@ -287,7 +287,7 @@ static inline int _mp4_box_parse(mp4read *m, struct mp4_box *parent, struct mp4_
 	if (box->osize > parent->size)
 		return MP4READ_ELARGE;
 
-	if (idx != -1 && ffbit_set32(&parent->usedboxes, idx) && !(box->type & F_MULTI))
+	if (idx != -1 && ffbit_set32(&parent->usedboxes, idx) && !(box->type & MP4_F_MULTI))
 		return MP4READ_EDUPBOX;
 
 	// skip box header
@@ -306,10 +306,10 @@ static inline int _mp4_box_close(mp4read *m, struct mp4_box *box)
 
 	if (box->ctx != NULL) {
 		for (ffuint i = 0;  ;  i++) {
-			if ((box->ctx[i].flags & F_REQ)
+			if ((box->ctx[i].flags & MP4_F_REQ)
 				&& !ffbit_test32(&box->usedboxes, i))
 				return MP4READ_ENOREQ;
-			if (box->ctx[i].flags & F_LAST)
+			if (box->ctx[i].flags & MP4_F_LAST)
 				break;
 		}
 	}
@@ -385,7 +385,7 @@ static inline int _mp4_box_process(mp4read *m, ffstr *data)
 		if (r < 0)
 			return _MP4R_ERR(m, MP4READ_EDATA);
 		m->curtrack->video.type = 0;
-		m->curtrack->video.codec = FFMP4_V_AVC1;
+		m->curtrack->video.codec = MP4_V_AVC1;
 		m->curtrack->video.codec_name = "H.264";
 		m->curtrack->video.width = v.width;
 		m->curtrack->video.height = v.height;
@@ -397,7 +397,7 @@ static inline int _mp4_box_process(mp4read *m, ffstr *data)
 			break;
 		if (NULL == ffstr_dup(&m->curtrack->audio.codec_conf, sbox.ptr, sbox.len))
 			return _MP4R_ERR(m, MP4READ_EMEM);
-		m->curtrack->audio.codec = FFMP4_ALAC;
+		m->curtrack->audio.codec = MP4_A_ALAC;
 		m->curtrack->audio.codec_name = "ALAC";
 		break;
 
@@ -409,11 +409,11 @@ static inline int _mp4_box_process(mp4read *m, ffstr *data)
 
 		switch (ac.type) {
 		case MP4_ESDS_DEC_MPEG4_AUDIO:
-			m->curtrack->audio.codec = FFMP4_AAC;
+			m->curtrack->audio.codec = MP4_A_AAC;
 			m->curtrack->audio.codec_name= "AAC";
 			break;
 		case MP4_ESDS_DEC_MPEG1_AUDIO:
-			m->curtrack->audio.codec = FFMP4_MPEG1;
+			m->curtrack->audio.codec = MP4_A_MPEG1;
 			m->curtrack->audio.codec_name= "MPEG-1";
 			break;
 		}
@@ -562,7 +562,10 @@ static inline int mp4read_process(mp4read *m, ffstr *input, ffstr *output)
 		switch (m->state) {
 
 		case R_GATHER_MORE:
-			m->buf.len = m->chunk.len;
+			if (m->buf.ptr == m->chunk.ptr)
+				m->buf.len = m->chunk.len;
+			else
+				ffvec_add2T(&m->buf, &m->chunk, char);
 			m->state = R_GATHER;
 			// fallthrough
 
@@ -612,11 +615,11 @@ static inline int mp4read_process(mp4read *m, ffstr *input, ffstr *output)
 			}
 
 			ffuint minsize = MP4_GET_MINSIZE(box->type);
-			if (box->type & F_FULLBOX)
+			if (box->type & MP4_F_FULLBOX)
 				minsize += sizeof(struct mp4_fullbox);
 			if (box->size < minsize)
 				return _MP4R_ERR(m, MP4READ_ESMALL);
-			if (box->type & F_WHOLE)
+			if (box->type & MP4_F_WHOLE)
 				minsize = box->size;
 			if (minsize != 0 && m->chunk.len == 0) {
 				m->gather_size = minsize;
@@ -629,7 +632,7 @@ static inline int mp4read_process(mp4read *m, ffstr *input, ffstr *output)
 			// fallthrough
 
 		case R_BOXPROCESS: {
-			if (box->type & F_FULLBOX) {
+			if (box->type & MP4_F_FULLBOX) {
 				ffstr_shift(&m->chunk, sizeof(struct mp4_fullbox));
 				box->size -= sizeof(struct mp4_fullbox);
 			}

@@ -218,12 +218,6 @@ static inline void mp4write_close(mp4write *m)
 	ffslice_free(&m->tags);
 }
 
-/** Get approximate output file size */
-static inline ffuint64 mp4write_size(mp4write *m)
-{
-	return 64 * 1024 + (m->info.total_samples / m->fmt.rate + 1) * (m->info.bitrate / 8);
-}
-
 /** Return size needed for the box */
 static inline ffuint _mp4_boxsize(mp4write *m, const struct mp4_bbox *b)
 {
@@ -291,11 +285,11 @@ static inline int _mp4_boxdata(mp4write *m, const struct mp4_bbox *b)
 	struct mp4_fullbox *fbox = NULL;
 	void *data = ffslice_end(&m->buf, 1) + sizeof(struct mp4box);
 
-	if (b->flags & F_RO) {
+	if (b->flags & MP4_F_RO) {
 		return -1;
 	}
 
-	if (b->flags & F_FULLBOX) {
+	if (b->flags & MP4_F_FULLBOX) {
 		fbox = data;
 		ffmem_zero(fbox, sizeof(struct mp4_fullbox));
 		data = fbox + 1;
@@ -476,7 +470,7 @@ static inline int mp4write_process(mp4write *m, ffstr *input, ffstr *output)
 		switch (m->state) {
 
 		case W_META_NEXT:
-			if (m->ctx[m->ictx]->flags & F_LAST) {
+			if (m->ctx[m->ictx]->flags & MP4_F_LAST) {
 				if (m->ictx == 0) {
 					m->mp4_size += m->buf.len;
 					ffstr_set2(output, &m->buf);
@@ -515,7 +509,7 @@ static inline int mp4write_process(mp4write *m, ffstr *input, ffstr *output)
 			}
 
 			box = ffslice_end(&m->buf, 1);
-			if (b->flags & F_FULLBOX)
+			if (b->flags & MP4_F_FULLBOX)
 				m->buf.len += mp4_fbox_write(b->type, box, n);
 			else
 				m->buf.len += mp4_box_write(b->type, box, n);
@@ -572,7 +566,6 @@ static inline int mp4write_process(mp4write *m, ffstr *input, ffstr *output)
 			goto frame;
 
 		case W_DATA1:
-			ffvec_free(&m->buf);
 			FFSLICE_FOREACH_T(&m->tags, tag_free, struct mp4_tag);
 			ffslice_free(&m->tags);
 			m->state = W_DATA;

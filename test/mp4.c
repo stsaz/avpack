@@ -2,8 +2,8 @@
 2021, Simon Zolin
 */
 
-#include <avpack/mp4read.h>
-#include <avpack/mp4write.h>
+#include <avpack/mp4-read.h>
+#include <avpack/mp4-write.h>
 #include <test/test.h>
 
 struct tag {
@@ -32,7 +32,6 @@ ffvec test_mp4_write()
 	info.frame_samples = 1024;
 	ffstr_setz(&info.conf, "aacconf");
 	x(0 == mp4write_create_aac(&m, &info));
-	x(0 != mp4write_size(&m));
 
 	const struct tag *tag;
 	FFARRAY_FOREACH(tags, tag) {
@@ -85,7 +84,8 @@ void test_mp4_read(ffstr data)
 	mp4read m = {};
 	m.log = mp4r_log;
 	mp4read_open(&m);
-	ffstr_setstr(&in, &data);
+	ffstr_set(&in, data.ptr, 1);
+	ffuint off = 1;
 
 	for (;;) {
 		r = mp4read_process(&m, &in, &out);
@@ -95,7 +95,7 @@ void test_mp4_read(ffstr data)
 			const struct mp4read_audio_info *ti = mp4read_track_info(&m, 0);
 			x(NULL == mp4read_track_info(&m, 1));
 			x(ti->type == 1);
-			x(ti->codec == FFMP4_AAC);
+			x(ti->codec == MP4_A_AAC);
 			x(ti->format.bits == 16);
 			x(ti->format.channels == 2);
 			x(ti->format.rate == 48000);
@@ -118,12 +118,21 @@ void test_mp4_read(ffstr data)
 			break;
 		}
 
+		case MP4READ_SEEK:
+			off = mp4read_offset(&m);
+			// fallthrough
+		case MP4READ_MORE:
+			ffstr_set(&in, data.ptr + off, 1);
+			off++;
+			break;
+
 		default:
 			x(0);
 		}
 	}
 
 next:
+	mp4read_track_activate(&m, 0);
 	for (;;) {
 		r = mp4read_process(&m, &in, &out);
 		// printf("mp4read_process: %d\n", r);
@@ -132,15 +141,18 @@ next:
 			x(0 == mp4read_cursample(&m));
 			xseq(&out, "aacframe1");
 			break;
-		case MP4READ_SEEK:
-			ffstr_setstr(&in, &data);
-			ffstr_shift(&in, mp4read_offset(&m));
-			break;
 
 		case MP4READ_DONE:
 			goto end;
 
+		case MP4READ_SEEK:
+			off = mp4read_offset(&m);
+			// fallthrough
 		case MP4READ_MORE:
+			ffstr_set(&in, data.ptr + off, 1);
+			off++;
+			break;
+
 		default:
 			// mp4read_error
 			x(0);
@@ -157,6 +169,9 @@ void test_mp4()
 {
 	ffvec buf = {};
 	buf = test_mp4_write();
+
 	ffstr data = FFSTR_INITSTR(&buf);
 	test_mp4_read(data);
+
+	ffvec_free(&buf);
 }
