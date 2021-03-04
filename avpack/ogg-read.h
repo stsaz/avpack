@@ -60,6 +60,7 @@ typedef struct oggread {
 		, pkt_incomplete :1 // expecting continued packet on next page
 		, unrecognized_data :1
 		, hdr_done :1
+		, chunk_processed :1
 		;
 
 	ogg_log_t log;
@@ -112,6 +113,12 @@ static int _oggread_hdr_find(oggread *o, const struct ogg_hdr **h, ffstr *input)
 	int r;
 	ffstr chunk;
 
+	if (o->chunk_processed) {
+		o->chunk_processed = 0;
+		if (o->buf.len != 0)
+			ffstr_erase_left((ffstr*)&o->buf, o->chunk.len);
+	}
+
 	for (;;) {
 
 		r = _avpack_gather_header((ffstr*)&o->buf, *input, sizeof(struct ogg_hdr), &chunk);
@@ -145,7 +152,6 @@ static int _oggread_hdr_find(oggread *o, const struct ogg_hdr **h, ffstr *input)
 	if (o->buf.len != 0) {
 		ffstr_erase_left((ffstr*)&o->buf, r);
 		hdr = (struct ogg_hdr*)o->buf.ptr;
-		o->buf.len = 0;
 	}
 	*h = hdr;
 	ffstr_set(&o->chunk, hdr, sizeof(struct ogg_hdr));
@@ -224,6 +230,7 @@ static int _oggread_seek_hdr(oggread *o, ffstr *input)
 			return -0xdeed;
 		}
 
+		o->buf.len = 0;
 		o->last_seek_off = o->off;
 		return OGGREAD_SEEK;
 	}
@@ -232,12 +239,16 @@ static int _oggread_seek_hdr(oggread *o, ffstr *input)
 		return OGGREAD_MORE;
 	}
 
-	if (ffint_le_cpu32_ptr(h->serial) != o->info.serial)
+	if (ffint_le_cpu32_ptr(h->serial) != o->info.serial) {
+		o->chunk_processed = 1;
 		return -0xca11; // skip page with unknown serial
+	}
 
 	ffuint64 page_endpos = ffint_le_cpu64_ptr(h->granulepos);
-	if (page_endpos == (ffuint64)-1)
+	if (page_endpos == (ffuint64)-1) {
+		o->chunk_processed = 1;
 		return -0xca11; // skip page with pos=-1
+	}
 
 	if (page_endpos < o->seekpt[0].sample
 		|| page_endpos > o->seekpt[1].sample)
@@ -348,9 +359,7 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 		switch (o->state) {
 
 		case R_GATHER_MORE:
-			if (o->buf.ptr == o->chunk.ptr) {
-				o->buf.len = o->chunk.len;
-			} else {
+			if (o->buf.len == 0) {
 				if (o->chunk.len != ffvec_add2T(&o->buf, &o->chunk, char))
 					return _OGGR_ERR(o, "not enough memory");
 			}
@@ -364,7 +373,6 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 			o->off += r;
 			if (o->chunk.len == 0)
 				return OGGREAD_MORE;
-			o->buf.len = 0;
 			o->state = o->next_state;
 			continue;
 
@@ -400,6 +408,7 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 				o->info.total_samples = gpos;
 			_oggread_log(o, "page#%u  endpos:%xU"
 				, ffint_le_cpu32_ptr(h->number), gpos);
+			o->chunk_processed = 1;
 			continue;
 		}
 
@@ -409,6 +418,7 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 			if (o->off == o->last_seek_off)
 				return _OGGR_ERR(o, "seek error");
 			o->last_seek_off = o->off;
+			o->buf.len = 0;
 			o->state = R_SEEK_HDR;
 			return OGGREAD_SEEK;
 
@@ -443,6 +453,7 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 			o->unrecognized_data = 0;
 			o->page_endpos = o->seekpt[0].sample;
 			o->seek_sample = (ffuint64)-1;
+			o->buf.len = 0;
 			o->state = R_HDR;
 			o->off = o->seekpt[0].off;
 			o->last_seek_off = 0;
@@ -505,6 +516,7 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 			case 0xca11:
 				break;
 			case 0xfeed:
+				o->chunk_processed = 1;
 				o->state = R_HDR;
 				break;
 			case OGGREAD_HEADER:
@@ -534,7 +546,7 @@ static inline void oggread_seek(oggread *o, ffuint64 sample)
 #define oggread_page_pos(o)  ((o)->page_startpos)
 
 #define oggread_page_num(o)  ((o)->page_num)
-#define oggread_pkt_num(o)  ((o)->pkt_num)
+#define oggread_pkt_num(o)  ((o)->pkt_num - 1)
 
 /** Get an absolute file offset to seek */
 #define oggread_offset(o)  ((o)->off)
