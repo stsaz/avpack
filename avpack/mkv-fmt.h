@@ -375,6 +375,7 @@ enum MKV_ELID {
 	MKV_T_DOCTYPE, // "matroska"
 	MKV_T_TRACKS,
 	MKV_T_SCALE,
+	MKV_T_TITLE,
 	MKV_T_DUR,
 
 	MKV_T_SEEKID,
@@ -458,6 +459,7 @@ Segment (0x18538067)
  Info (0x1549a966)
   TimecodeScale (0x2ad7b1)
   Duration (0x4489)
+  Title (0x7ba9)
  Tracks (0x1654ae6b)
   TrackEntry (0xae)
    Name (0x536e)
@@ -524,6 +526,7 @@ static const struct mkv_binel mkv_ctx_segment[] = {
 
 static const struct mkv_binel mkv_ctx_info[] = {
 	{ 0x2ad7b1,	MKV_T_SCALE | MKV_F_INT | MKV_DEF(1000000), NULL },
+	{ 0x7ba9,	MKV_T_TITLE | MKV_F_WHOLE, NULL },
 	{ 0x4489,	MKV_T_DUR | MKV_F_FLT | MKV_F_LAST, NULL },
 };
 

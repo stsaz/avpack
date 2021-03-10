@@ -357,6 +357,9 @@ static int _mkvread_el(mkvread *m, ffstr *output)
 	case MKV_T_DUR:
 		m->dur = fval;  break;
 
+	case MKV_T_TITLE:
+		m->tagval = m->gbuf;  break;
+
 
 	// case MKV_T_SEEKID:
 	// case MKV_T_SEEKPOS:
@@ -487,6 +490,11 @@ static int _mkvread_el_close(mkvread *m)
 		m->curtrack = NULL;
 		ffstr_null(&m->codec_data);
 		break;
+
+	case MKV_T_TITLE:
+		ffvec_free(&m->tagname);
+		ffstr_setz(&m->tagname, "title");
+		return MKVREAD_TAG;
 
 	case MKV_T_TAG:
 		return MKVREAD_TAG;
