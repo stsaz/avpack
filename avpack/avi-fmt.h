@@ -41,6 +41,7 @@ struct avi_strh {
 #define AVI_MOVI_VIDEO  "dc"
 
 enum AVI_STRF_FMT {
+	AVI_A_PCM = 0x0001,
 	AVI_A_MP3 = 0x0055,
 	AVI_A_AAC = 0x00FF,
 };
@@ -52,7 +53,7 @@ struct avi_strf_audio {
 	ffbyte byte_rate[4];
 	ffbyte block_align[2];
 	ffbyte bit_depth[2];
-	ffbyte exsize[2];
+	ffbyte exsize[0]; // [2]
 };
 
 struct avi_strf_mp3 {
@@ -102,6 +103,9 @@ static int avi_strf_read(struct avi_audio_info *ai, const char *data, ffsize len
 	ai->channels = ffint_le_cpu16_ptr(f->channels);
 	ai->sample_rate = ffint_le_cpu32_ptr(f->sample_rate);
 	ai->bitrate = ffint_le_cpu32_ptr(f->byte_rate) * 8;
+
+	if (sizeof(struct avi_strf_audio)+2 > len)
+		return 0;
 
 	ffuint exsize = ffint_le_cpu16_ptr(f->exsize);
 	if (exsize > len)

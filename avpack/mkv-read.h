@@ -97,7 +97,7 @@ typedef struct mkvread {
 	ffuint64 clust1_off;
 	ffuint64 seek_msec;
 
-	ffstr tagname;
+	ffvec tagname;
 	ffstr tagval;
 
 	mkv_log_t log;
@@ -128,7 +128,7 @@ static inline const void* mkvread_track_info(mkvread *m, int index)
 static inline ffstr mkvread_tag(mkvread *m, ffstr *val)
 {
 	*val = m->tagval;
-	return m->tagname;
+	return *(ffstr*)&m->tagname;
 }
 
 static inline void _mkvread_log(mkvread *m, const char *fmt, ...)
@@ -230,6 +230,7 @@ static inline void mkvread_close(mkvread *m)
 	ffvec_free(&m->buf);
 	ffstr_free(&m->codec_data);
 	ffvec_free(&m->lacing);
+	ffvec_free(&m->tagname);
 }
 
 static inline void mkvread_seek(mkvread *m, ffuint64 msec)
@@ -409,7 +410,8 @@ static int _mkvread_el(mkvread *m, ffstr *output)
 
 
 	case MKV_T_TAG_NAME:
-		ffstr_set2(&m->tagname, &m->gbuf);
+		ffvec_free(&m->tagname);
+		ffstr_dup2((ffstr*)&m->tagname, &m->gbuf);
 		break;
 
 	case MKV_T_TAG_VAL:
