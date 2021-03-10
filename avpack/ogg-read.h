@@ -287,7 +287,8 @@ static int _oggread_seek_adj(oggread *o, const void *page_hdr)
 /** Get next packet */
 static int _oggread_pkt(oggread *o, ffstr *output)
 {
-	int r = ogg_pkt_next(o->chunk.ptr, &o->seg_off, &o->body_off, output);
+	ffstr out = {};
+	int r = ogg_pkt_next(o->chunk.ptr, &o->seg_off, &o->body_off, &out);
 	if (r == -1) {
 		return 0xfeed;
 	}
@@ -303,10 +304,10 @@ static int _oggread_pkt(oggread *o, ffstr *output)
 	}
 
 	_oggread_log(o, "packet #%u.%u  size:%u"
-		, o->page_num, o->pkt_num, (int)output->len);
+		, o->page_num, o->pkt_num, (int)out.len);
 
 	if (r == -2 || o->pkt_incomplete) {
-		if (output->len != ffvec_add2T(&o->pkt_data, output, char))
+		if (out.len != ffvec_add2T(&o->pkt_data, &out, char))
 			return _OGGR_ERR(o, "not enough memory");
 
 		if (!o->pkt_incomplete) {
@@ -317,6 +318,9 @@ static int _oggread_pkt(oggread *o, ffstr *output)
 
 		ffstr_set2(output, &o->pkt_data);
 		o->pkt_data.len = 0;
+
+	} else {
+		*output = out;
 	}
 
 	o->pkt_num++;
