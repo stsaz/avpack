@@ -1,5 +1,5 @@
 /** avpack: .mkv reader
-* no seeking
+* inaccurate seeking (Cluster element only)
 
 2016,2021, Simon Zolin
 */
@@ -18,6 +18,7 @@ mkvread_block_trackid
 #pragma once
 
 #include <avpack/mkv-fmt.h>
+#include <avpack/shared.h>
 
 struct mkv_el {
 	int id; // enum MKV_ELID
@@ -92,10 +93,14 @@ typedef struct mkvread {
 	ffsize lacing_off;
 	ffuint64 block_trackid;
 
-	ffuint64 total_size;
+	// seeking:
+	struct _mkvread_seekpoint seekpt_glob[2];
 	struct _mkvread_seekpoint seekpt[2];
-	ffuint64 clust1_off;
 	ffuint64 seek_msec;
+	ffuint64 last_seek_off;
+	ffuint seek_clust_time;
+	ffuint64 segment_size;
+	ffuint64 clust_off;
 
 	ffvec tagname;
 	ffstr tagval;
@@ -211,9 +216,11 @@ total_size: (optional) */
 static inline int mkvread_open(mkvread *m, ffuint64 total_size)
 {
 	m->seek_msec = (ffuint64)-1;
-	m->total_size = (total_size == 0) ? (ffuint64)-1 : total_size;
+	m->seekpt_glob[1].off = (total_size == 0) ? (ffuint64)-1 : total_size;
 	m->els[m->ictx].size = (ffuint64)-1;
 	m->els[m->ictx].ctx = mkv_ctx_global;
+	if (NULL == ffvec_alloc(&m->buf, 4096, 1))
+		return -1;
 	return 0;
 }
 
@@ -423,8 +430,10 @@ static int _mkvread_el(mkvread *m, ffstr *output)
 
 
 	case MKV_T_CLUST:
-		if (m->clust1_off == 0) {
-			m->clust1_off = m->el_off;
+		if (m->seekpt_glob[0].off == 0) {
+			const struct mkv_el *parent = &m->els[m->ictx - 1];
+			m->segment_size = parent->size - (m->el_hdrsize + el->size);
+			m->seekpt_glob[0].off = m->el_off;
 			m->curtrack = NULL;
 			return MKVREAD_HEADER;
 		}
@@ -436,11 +445,16 @@ static int _mkvread_el(mkvread *m, ffstr *output)
 
 	case MKV_T_BLOCK:
 	case MKV_T_SBLOCK:
+		if (m->seek_msec != (ffuint64)-1) {
+			m->state = 7 /*R_SEEK1*/;
+			return 0xca11;
+		}
+
 		r = _mkvread_block(m, &m->gbuf);
 		switch (r) {
 		case 0x1ace:
 			m->state = 4 /*R_LACING*/;
-			return -1;
+			return 0xca11;
 		case MKVREAD_DATA:
 			break;
 		case MKVREAD_ERROR:
@@ -452,12 +466,6 @@ static int _mkvread_el(mkvread *m, ffstr *output)
 		return MKVREAD_DATA;
 	}
 
-	if (el->ctx != NULL) {
-		m->state = 5 /*R_NEXTCHUNK*/;
-		return -1;
-	}
-
-	m->state = 6 /*R_SKIP*/;
 	return -1;
 }
 
@@ -479,10 +487,12 @@ static int _mkvread_el_close(mkvread *m)
 		switch (m->curtrack->type) {
 		case MKV_TRK_AUDIO:
 			m->curtrack->audio.duration_msec = m->dur * m->scale / 1000000;
+			m->seekpt_glob[1].pos = ffmax(m->seekpt_glob[1].pos, m->curtrack->audio.duration_msec);
 			m->curtrack->audio.codec_conf = m->codec_data;
 			break;
 		case MKV_TRK_VIDEO:
 			m->curtrack->video.duration_msec = m->dur * m->scale / 1000000;
+			m->seekpt_glob[1].pos = ffmax(m->seekpt_glob[1].pos, m->curtrack->video.duration_msec);
 			m->curtrack->video.codec_conf = m->codec_data;
 			break;
 		}
@@ -502,6 +512,150 @@ static int _mkvread_el_close(mkvread *m)
 	return -1;
 }
 
+/** Exit from Cluster element's context */
+static void _mkvr_cluster_exit(mkvread *m)
+{
+	for (;;) {
+		struct mkv_el *el = &m->els[m->ictx];
+		ffuint id = el->id;
+		ffmem_zero_obj(el);
+		m->ictx--;
+		if (id == MKV_T_CLUST) {
+			FF_ASSERT(m->els[m->ictx].id == MKV_T_SEG);
+			// reset Segment element's size, otherwise we'll get the error "child element is too large"
+			m->els[m->ictx].size = m->segment_size;
+			break;
+		}
+	}
+}
+
+/** Estimate file offset by time position */
+static ffuint64 _mkvr_seek_offset(const struct _mkvread_seekpoint *pt, ffuint64 target)
+{
+	ffuint64 samples = pt[1].pos - pt[0].pos;
+	ffuint64 size = pt[1].off - pt[0].off;
+	ffuint64 off = (target - pt[0].pos) * size / samples;
+	return pt[0].off + off;
+}
+
+/** Find Cluster element */
+static int _mkvr_seek_sync(mkvread *m, ffstr *input)
+{
+	int r;
+	ffstr chunk;
+	for (;;) {
+
+		r = _avpack_gather_header((ffstr*)&m->buf, *input, 4, &chunk);
+		int hdr_shifted = r;
+		ffstr_shift(input, r);
+		m->off += r;
+
+		if (chunk.len == 0) {
+			ffstr_null(&m->gbuf);
+			return MKVREAD_MORE;
+		}
+
+		r = ffstr_find(&chunk, "\x1f\x43\xb6\x75", 4);
+		if (r >= 0) {
+			if (chunk.ptr != m->buf.ptr) {
+				ffstr_shift(input, r);
+				m->off += r;
+			}
+			ffstr_shift(&chunk, r);
+			break;
+		}
+
+		r = _avpack_gather_trailer((ffstr*)&m->buf, *input, 4, hdr_shifted);
+		// r<0: ffstr_shift() isn't suitable due to assert()
+		input->ptr += r;
+		input->len -= r;
+		m->off += r;
+	}
+
+	ffstr_set(&m->gbuf, chunk.ptr, 4);
+	if (m->buf.len != 0) {
+		ffstr_erase_left((ffstr*)&m->buf, r);
+		ffstr_set(&m->gbuf, m->buf.ptr, 4);
+	}
+	return 0;
+}
+
+/** Process element while seeking */
+static int _mkvr_seek_process_el(mkvread *m)
+{
+	const struct mkv_el *el = &m->els[m->ictx];
+
+	ffuint64 val = 0;
+	int val4 = 0;
+	if (el->flags & (MKV_F_INT | MKV_F_INT8)) {
+		if (0 != mkv_int_ntoh(&val, m->gbuf.ptr, m->gbuf.len))
+			return _MKVR_ERR(m, MKV_EINTVAL);
+
+		if ((el->flags & MKV_F_INT) && val > 0xffffffff)
+			return _MKVR_ERR(m, MKV_EINTVAL);
+
+		val4 = val;
+	}
+
+	switch (el->id) {
+
+	case MKV_T_CLUST:
+		m->clust_off = m->el_off;  break;
+
+	case MKV_T_TIME:
+		m->clust_time = val4;
+		return -1;
+	}
+
+	return 0;
+}
+
+/** Adjust the search window after the current offset has become too large */
+static int _mkvr_seek_adjust_edge(mkvread *m)
+{
+	if (m->off >= m->seekpt[1].off) {
+		_mkvread_log(m, "seek: no new cluster at offset %xU", m->last_seek_off);
+
+		m->seekpt[1].off = m->last_seek_off; // narrow the search window to make some progress
+		if (m->seekpt[1].off - m->seekpt[0].off > 64*1024) {
+			m->off = m->seekpt[0].off + (m->seekpt[1].off - m->seekpt[0].off) / 2; // binary search
+		} else {
+			m->off = m->seekpt[0].off + 1; // small search window: try to find a 2nd cluster
+		}
+
+		if (m->off == m->last_seek_off) {
+			return 0xdeed;
+		}
+
+		m->last_seek_off = m->off;
+		return MKVREAD_SEEK;
+	}
+	return 0;
+}
+
+/** Adjust the search window */
+static int _mkvr_seek_adjust(mkvread *m)
+{
+	const struct _mkvread_seekpoint *sp = m->seekpt;
+	_mkvread_log(m, "seek: tgt:%xU cur:%xU [%xU..%xU](%xU)  off:%xU [%xU..%xU](%xU)"
+		, m->seek_msec, m->clust_time
+		, sp[0].pos, sp[1].pos, sp[1].pos - sp[0].pos
+		, m->clust_off
+		, sp[0].off, sp[1].off, sp[1].off - sp[0].off);
+
+	if (m->seek_msec >= m->clust_time) {
+		m->seekpt[0].pos = m->clust_time;
+		m->seekpt[0].off = m->clust_off;
+	} else {
+		m->seekpt[1].pos = m->clust_time;
+		m->seekpt[1].off = m->clust_off;
+	}
+
+	if (m->seekpt[0].off >= m->seekpt[1].off)
+		return 1;
+	return 0;
+}
+
 /* MKV read algorithm:
 . gather data for element id
 . gather data for element size
@@ -509,13 +663,19 @@ static int _mkvread_el_close(mkvread *m)
  . search element within the current context
  . skip if unknown
  . or gather its data and convert (string -> int/float) if needed
+
+Seeking:
+. seek to an estimated file position
+. find Cluster element, parse its Time element, narrow the search window
+. repeat until the target Cluster is found
 */
 static inline int mkvread_process(mkvread *m, ffstr *input, ffstr *output)
 {
 	enum {
 		R_ELID1, R_ELSIZE1, R_ELSIZE, R_EL,
 		R_LACING=4,
-		R_NEXTCHUNK=5, R_SKIP=6,
+		R_NEXTCHUNK, R_SKIP,
+		R_SEEK1=7, R_SEEK, R_SEEK_SYNC, R_SEEK_DONE,
 		R_GATHER, R_GATHER_MORE,
 	};
 	int r;
@@ -618,13 +778,40 @@ static inline int mkvread_process(mkvread *m, ffstr *input, ffstr *output)
 			}
 			continue;
 
-		case R_EL:
-			r = _mkvread_el(m, output);
-			if (r != -1)
-				return r;
+		case R_EL: {
+			if (!m->seek_clust_time) {
+				r = _mkvread_el(m, output);
+				if (r == 0xca11)
+					continue;
+				else if (r != -1)
+					return r;
+			} else {
+				r = _mkvr_seek_process_el(m);
+				if (r == MKVREAD_ERROR)
+					return MKVREAD_ERROR;
+				else if (r == -1) {
+					if (_mkvr_seek_adjust(m)) {
+						m->state = R_SEEK_DONE;
+						continue;
+					}
+					m->state = R_SEEK;
+					continue;
+				}
+			}
+
+			struct mkv_el *el = &m->els[m->ictx];
+			m->state = R_SKIP;
+			if (el->ctx != NULL)
+				m->state = R_NEXTCHUNK;
 			continue;
+		}
 
 		case R_LACING: {
+			if (m->seek_msec != (ffuint64)-1) {
+				m->state = R_SEEK1;
+				continue;
+			}
+
 			if (m->lacing_off == m->lacing.len) {
 				m->state = R_SKIP;
 				ffstr_set2(output, &m->gbuf);
@@ -636,6 +823,52 @@ static inline int mkvread_process(mkvread *m, ffstr *input, ffstr *output)
 			ffstr_shift(&m->gbuf, n);
 			return MKVREAD_DATA;
 		}
+
+
+		case R_SEEK1:
+			if (m->seekpt_glob[1].off == (ffuint64)-1)
+				return _MKVR_ERRSTR(m, "can't seek");
+			m->last_seek_off = 0;
+			ffmem_copy(m->seekpt, m->seekpt_glob, sizeof(m->seekpt));
+			// fallthrough
+		case R_SEEK:
+			_mkvr_cluster_exit(m);
+			m->off = _mkvr_seek_offset(m->seekpt, m->seek_msec);
+			if (m->off == m->last_seek_off)
+				return _MKVR_ERRSTR(m, "seek error");
+			m->last_seek_off = m->off;
+			m->buf.len = 0;
+			m->state = R_SEEK_SYNC;
+			return MKVREAD_SEEK;
+
+		case R_SEEK_SYNC: {
+			r = _mkvr_seek_sync(m, input);
+
+			int r2 = _mkvr_seek_adjust_edge(m);
+			if (r2 == 0xdeed) {
+				m->state = R_SEEK_DONE;
+				continue;
+			} else if (r2 == MKVREAD_SEEK)
+				return MKVREAD_SEEK;
+
+			if (r == MKVREAD_MORE)
+				return MKVREAD_MORE;
+
+			m->seek_clust_time = 1;
+			m->gsize = 4 + 1;
+			m->state = R_GATHER_MORE;  m->gstate = R_ELSIZE1;
+			continue;
+		}
+
+		case R_SEEK_DONE:
+			m->seek_clust_time = 0;
+			m->buf.len = 0;
+			m->seek_msec = (ffuint64)-1;
+			m->last_seek_off = 0;
+			m->state = R_ELID1;
+			m->off = m->seekpt[0].off;
+			ffmem_zero(m->seekpt, sizeof(m->seekpt));
+			return MKVREAD_SEEK;
 
 		}
 	}

@@ -2,6 +2,8 @@
 2021, Simon Zolin
 */
 
+#pragma once
+
 /** Gather data chunk of size from TOTAL to (TOTAL-1)*2 or return the whole input buffer */
 static ffssize _avpack_gather_header(ffstr *buf, ffstr in, ffsize total, ffstr *out)
 {

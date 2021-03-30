@@ -163,6 +163,68 @@ end:
 	mkvread_close(&m);
 }
 
+void test_mkv_seek(ffstr data, ffuint delta)
+{
+	int r;
+	ffstr in, out;
+	mkvread m = {};
+	m.log = mkvr_log;
+	mkvread_open(&m, data.len);
+	ffuint seek = 0;
+	ffstr_set(&in, data.ptr, 1);
+	ffuint off = 1;
+	ffuint reqs = 0, fileseek = 0;
+	const struct mkvread_audio_info *info = NULL;
+
+	for (;;) {
+		r = mkvread_process(&m, &in, &out);
+		// printf("mkvread_process: %d\n", r);
+		switch (r) {
+		case MKVREAD_HEADER:
+			for (int i = 0;  ;  i++) {
+				const struct mkvread_audio_info *info2;
+				info2 = mkvread_track_info(&m, i);
+				x(info2 != NULL);
+				if (info2->type == MKV_TRK_AUDIO) {
+					info = info2;
+					break;
+				}
+			}
+			break;
+		case MKVREAD_DATA:
+			x(mkvread_curpos(&m) <= seek);
+
+			seek += delta * 1000;
+			if (seek > info->duration_msec)
+				goto end;
+			reqs++;
+			mkvread_seek(&m, seek);
+			printf("\nmkvread: seeking to: %u\n", seek);
+			break;
+		case MKVREAD_SEEK:
+			fileseek++;
+			off = mkvread_offset(&m);
+			// fallthrough
+		case MKVREAD_MORE:
+			ffstr_set(&in, data.ptr + off, 1);
+			off++;
+			break;
+
+		case MKVREAD_DONE:
+			goto end;
+
+		default:
+			printf("error: mkvread_process: %s\n", mkvread_error(&m));
+			x(0);
+		}
+	}
+
+end:
+	printf("mkvread: seek-reqs:%u  avg-file-seek-reqs:%u\n"
+		, reqs, fileseek/reqs);
+	mkvread_close(&m);
+}
+
 void test_mkv()
 {
 	ffstr data = {};
@@ -173,4 +235,11 @@ void test_mkv()
 #endif
 
 	test_mkv_read(data);
+
+#if 0
+	data.ptr = NULL;
+	file_readall("/tmp/1.mkv", &data);
+	test_mkv_seek(data, 71);
+	ffstr_free(&data);
+#endif
 }
