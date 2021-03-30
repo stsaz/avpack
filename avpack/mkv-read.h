@@ -346,8 +346,7 @@ static int _mkvread_el(mkvread *m, ffstr *output)
 		break;
 
 	case MKV_T_DOCTYPE:
-		if (!ffstr_eqcz(&m->gbuf, "matroska"))
-			return _MKVR_ERRSTR(m, "unsupported EBML doctype");
+		_mkvread_log(m, "doctype: %S", &m->gbuf);
 		break;
 
 

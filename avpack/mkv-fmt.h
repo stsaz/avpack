@@ -31,49 +31,44 @@ enum MKV_E {
 /** Codec ID */
 enum MKV_CODEC {
 	MKV_A_AAC = 1,
+	MKV_A_AC3,
 	MKV_A_ALAC,
 	MKV_A_MPEG,
-	MKV_A_VORBIS,
-	MKV_A_AC3,
+	MKV_A_OPUS,
 	MKV_A_PCM,
+	MKV_A_VORBIS,
+
+	MKV_S_ASS,
+	MKV_S_UTF8,
 
 	MKV_V_AVC,
 	MKV_V_HEVC,
-
-	MKV_S_UTF8,
-	MKV_S_ASS,
 };
 
 // MKV_CODEC_ID:
 static const char* const mkv_codecstr[] = {
 	"A_AAC",
+	"A_AC3",
 	"A_ALAC",
 	"A_MPEG",
-	"A_VORBIS",
-	"A_AC3",
+	"A_OPUS",
 	"A_PCM/INT/LIT",
+	"A_VORBIS",
+
+	"S_TEXT/ASS",
+	"S_TEXT/UTF8",
 
 	"V_MPEG4/ISO/AVC",
 	"V_MPEGH/ISO/HEVC",
-
-	"S_TEXT/UTF8",
-	"S_TEXT/ASS",
 };
 
 /** Translate codec name to ID */
 static int mkv_codec(ffstr name)
 {
-	int r;
-	r = ffszarr_find(mkv_codecstr, FF_COUNT(mkv_codecstr), name.ptr, name.len);
-	if (r >= 0)
-		return r + 1;
-
-	if (ffstr_matchcz(&name, "A_AAC"))
-		r = MKV_A_AAC;
-	else if (ffstr_matchcz(&name, "A_MPEG"))
-		r = MKV_A_MPEG;
-
-	return r;
+	int r = ffszarr_findsorted(mkv_codecstr, FF_COUNT(mkv_codecstr), name.ptr, name.len);
+	if (r < 0)
+		return -1;
+	return r + 1;
 }
 
 /** Parse variable width integer.
