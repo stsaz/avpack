@@ -204,6 +204,26 @@ static ffuint64 _oggread_seek_offset(const struct _oggread_seekpoint *pt, ffuint
 	return pt[0].off + off;
 }
 
+/** Adjust the search window after the current offset has become too large */
+static int _oggread_seek_adjust_edge(oggread *o, struct _oggread_seekpoint *sp)
+{
+	_oggread_log(o, "seek: no new page at offset %xU", o->last_seek_off);
+	sp[1].off = o->last_seek_off; // narrow the search window to make some progress
+	if (sp[1].off - sp[0].off > 4096) {
+		o->off = sp[0].off + (sp[1].off - sp[0].off) / 2; // binary search
+	} else {
+		o->off = sp[0].off; // small search window: try the leftmost page
+	}
+
+	if (o->off == o->last_seek_off) {
+		return -0xdeed;
+	}
+
+	o->buf.len = 0;
+	o->last_seek_off = o->off;
+	return OGGREAD_SEEK;
+}
+
 /** Find and process header
 Return full header size */
 static int _oggread_seek_hdr(oggread *o, ffstr *input)
@@ -218,21 +238,7 @@ static int _oggread_seek_hdr(oggread *o, ffstr *input)
 	if ((r == 0 && o->off >= o->seekpt[1].off) // there's no page at all within the right end of the search window
 		|| (r != 0 && o->off - o->chunk.len >= o->seekpt[1].off)) { // this page we processed before
 
-		_oggread_log(o, "seek: no new page at offset %xU", o->last_seek_off);
-		if (o->seekpt[1].off - o->seekpt[0].off > 4096) {
-			o->seekpt[1].off = o->last_seek_off; // narrow the search window to make some progress
-			o->off = o->seekpt[0].off + (o->seekpt[1].off - o->seekpt[0].off) / 2; // binary search
-		} else {
-			o->off = o->seekpt[0].off; // small search window: try the leftmost page
-		}
-
-		if (o->off == o->last_seek_off) {
-			return -0xdeed;
-		}
-
-		o->buf.len = 0;
-		o->last_seek_off = o->off;
-		return OGGREAD_SEEK;
+		return _oggread_seek_adjust_edge(o, o->seekpt);
 	}
 
 	if (r == 0) {
@@ -258,7 +264,7 @@ static int _oggread_seek_hdr(oggread *o, ffstr *input)
 }
 
 /** Adjust search boundaries */
-static int _oggread_seek_adj(oggread *o, const void *page_hdr)
+static int _oggread_seek_adj(oggread *o, const void *page_hdr, struct _oggread_seekpoint *sp)
 {
 	const struct ogg_hdr *h = (struct ogg_hdr*)page_hdr;
 	ffuint64 page_endpos = ffint_le_cpu64_ptr(h->granulepos);
@@ -267,19 +273,19 @@ static int _oggread_seek_adj(oggread *o, const void *page_hdr)
 
 	_oggread_log(o, "seek: tgt:%xU cur:%xU [%xU..%xU](%xU)  off:%xU [%xU..%xU](%xU)"
 		, o->seek_sample, page_endpos
-		, o->seekpt[0].sample, o->seekpt[1].sample, o->seekpt[1].sample - o->seekpt[0].sample
+		, sp[0].sample, sp[1].sample, sp[1].sample - sp[0].sample
 		, page_off
-		, o->seekpt[0].off, o->seekpt[1].off, o->seekpt[1].off - o->seekpt[0].off);
+		, sp[0].off, sp[1].off, sp[1].off - sp[0].off);
 
 	if (o->seek_sample >= page_endpos) {
-		o->seekpt[0].sample = page_endpos;
-		o->seekpt[0].off = page_off + page_size;
+		sp[0].sample = page_endpos;
+		sp[0].off = page_off + page_size;
 	} else {
-		o->seekpt[1].sample = page_endpos; // start-pos of the _next_ page
-		o->seekpt[1].off = page_off; // offset of the _current_ page
+		sp[1].sample = page_endpos; // start-pos of the _next_ page
+		sp[1].off = page_off; // offset of the _current_ page
 	}
 
-	if (o->seekpt[0].off >= o->seekpt[1].off)
+	if (sp[0].off >= sp[1].off)
 		return 1;
 	return 0;
 }
@@ -447,7 +453,7 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 			continue;
 
 		case R_SEEK_ADJUST:
-			if (0 == _oggread_seek_adj(o, o->chunk.ptr)) {
+			if (0 == _oggread_seek_adj(o, o->chunk.ptr, o->seekpt)) {
 				o->state = R_SEEK;
 				continue;
 			}
