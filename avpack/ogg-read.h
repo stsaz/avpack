@@ -138,6 +138,7 @@ static int _oggread_hdr_find(oggread *o, const struct ogg_hdr **h, ffstr *input)
 				ffstr_shift(input, r);
 				o->off += r;
 			}
+			ffstr_shift(&chunk, r);
 			break;
 		}
 

@@ -165,6 +165,7 @@ static inline int mp4write_create_aac(mp4write *m, struct mp4_info *info)
 }
 
 /**
+mmtag: enum MMTAG
 Return 0 on success */
 static inline int mp4write_addtag(mp4write *m, ffuint mmtag, ffstr val)
 {

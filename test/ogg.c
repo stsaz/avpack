@@ -5,6 +5,8 @@
 #include <avpack/ogg-read.h>
 #include <avpack/ogg-write.h>
 #include <test/test.h>
+#include <ffbase/mem-print.h>
+extern int Verbose;
 
 ffvec test_ogg_write()
 {
@@ -154,18 +156,16 @@ end:
 	oggread_close(&o);
 }
 
-#include <ffbase/mem-print.h>
-
 void test_ogg()
 {
 	ffvec buf = {};
 	buf = test_ogg_write();
 
-#if 0
-	ffstr s = ffmem_print(buf.ptr, buf.len, FFMEM_PRINT_ZEROSPACE);
-	printf("%.*s\n", (int)s.len, s.ptr);
-	ffstr_free(&s);
-#endif
+	if (Verbose) {
+		ffstr s = ffmem_print(buf.ptr, buf.len, FFMEM_PRINT_ZEROSPACE);
+		printf("%.*s\n", (int)s.len, s.ptr);
+		ffstr_free(&s);
+	}
 
 	ffstr data = FFSTR_INITSTR(&buf);
 	test_ogg_read(data);

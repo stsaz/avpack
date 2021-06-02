@@ -5,6 +5,8 @@
 #include <avpack/wav-read.h>
 #include <avpack/wav-write.h>
 #include <test/test.h>
+#include <ffbase/mem-print.h>
+extern int Verbose;
 
 ffvec test_wav_write()
 {
@@ -136,18 +138,16 @@ end:
 	wavread_close(&w);
 }
 
-#include <ffbase/mem-print.h>
-
 void test_wav()
 {
 	ffvec buf = {};
 	buf = test_wav_write();
 
-#if 0
-	ffstr s = ffmem_print(buf.ptr, buf.len, FFMEM_PRINT_ZEROSPACE);
-	printf("%.*s\n", (int)s.len, s.ptr);
-	ffstr_free(&s);
-#endif
+	if (Verbose) {
+		ffstr s = ffmem_print(buf.ptr, buf.len, FFMEM_PRINT_ZEROSPACE);
+		printf("%.*s\n", (int)s.len, s.ptr);
+		ffstr_free(&s);
+	}
 
 	ffstr data = FFSTR_INITSTR(&buf);
 	test_wav_read(data);

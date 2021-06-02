@@ -27,20 +27,30 @@ static const struct test atests[] = {
 };
 #undef T
 
+int Verbose;
+
 int main(int argc, const char **argv)
 {
 	const struct test *t;
 
 	if (argc == 1) {
+		printf("Usage: avpack-test [-v] TEST...\n");
 		printf("Supported tests: all ");
 		FF_FOREACH(atests, t) {
 			printf("%s ", t->name);
 		}
 		printf("\n");
+		printf("Options: -v  Verbose\n");
 		return 0;
 	}
 
-	if (ffsz_eq(argv[1], "all")) {
+	ffuint ia = 1;
+	if (ffsz_eq(argv[ia], "-v")) {
+		Verbose = 1;
+		ia++;
+	}
+
+	if (ffsz_eq(argv[ia], "all")) {
 		//run all tests
 		FF_FOREACH(atests, t) {
 			printf("%s\n", t->name);
@@ -52,7 +62,7 @@ int main(int argc, const char **argv)
 
 	//run the specified tests only
 
-	for (ffuint n = 1;  n < (ffuint)argc;  n++) {
+	for (ffuint n = ia;  n < (ffuint)argc;  n++) {
 		const struct test *sel = NULL;
 
 		FF_FOREACH(atests, t) {
