@@ -22,9 +22,12 @@ Contents:
 * .avi read: `avpack/avi-read.h`
 * .caf read: `avpack/caf-read.h`
 * .mkv read: `avpack/mkv-read.h`
+* .mp3 read/write: `avpack/mp3-read.h`, `avpack/mp3-write.h`
 * .mp4/.m4a/.mov read/write: `avpack/mp4-read.h`, `avpack/mp4-write.h`
 * .ogg/.opus read/write: `avpack/ogg-read.h`, `avpack/ogg-write.h`
 * .wav read/write: `avpack/wav-read.h`, `avpack/wav-write.h`
+* ID3v1 & ID3v2 read/write: `avpack/id3v1.h`, `avpack/id3v2.h`
+* MPEG-1 stream read: `avpack/mpeg1-read.h`
 
 It doesn't contain code that reads or writes files - this is user's responsibility.
 

@@ -8,6 +8,7 @@
 extern void test_avi();
 extern void test_caf();
 extern void test_mkv();
+extern void test_mp3();
 extern void test_mp4();
 extern void test_ogg();
 extern void test_wav();
@@ -21,6 +22,7 @@ static const struct test atests[] = {
 	T(avi),
 	T(caf),
 	T(mkv),
+	T(mp3),
 	T(mp4),
 	T(ogg),
 	T(wav),

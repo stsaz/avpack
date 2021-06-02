@@ -2,6 +2,8 @@
 2021, Simon Zolin
 */
 
+#pragma once
+
 enum MMTAG {
 	MMTAG_UNKNOWN,
 

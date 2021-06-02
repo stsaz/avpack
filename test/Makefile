@@ -59,6 +59,7 @@ OBJ := \
 	$(OUT_DIR)/caf.o \
 	$(OUT_DIR)/main.o \
 	$(OUT_DIR)/mkv.o \
+	$(OUT_DIR)/mp3.o \
 	$(OUT_DIR)/mp4.o \
 	$(OUT_DIR)/ogg.o \
 	$(OUT_DIR)/wav.o \
