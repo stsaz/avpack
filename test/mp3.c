@@ -52,6 +52,9 @@ ffvec test_mp3_write()
 			off += out.len;
 			v.len = ffmax(v.len, off);
 			break;
+		case MP3WRITE_SEEK:
+			off = mp3write_offset(&m);
+			break;
 		case MP3WRITE_DONE:
 			x(in.len == 0);
 			goto end;

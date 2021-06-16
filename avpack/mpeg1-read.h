@@ -125,7 +125,7 @@ static inline const char* mpeg1read_error(mpeg1read *m)
 
 static inline void _mpeg1read_info(mpeg1read *m, ffstr data)
 {
-	const int DEC_DELAY = 528+1;
+	const ffuint DEC_DELAY = 528+1;
 	int r;
 	const void *h = data.ptr;
 	ffuint frsz = mpeg1_size(h);
@@ -140,7 +140,8 @@ static inline void _mpeg1read_info(mpeg1read *m, ffstr data)
 		struct mpeg1_lame lame = {};
 		if (mpeg1_lame_read(&lame, &data.ptr[r], frsz - r) > 0) {
 			xing.delay = lame.enc_delay;
-			padding = lame.enc_padding;
+			if (lame.enc_padding > DEC_DELAY)
+				padding = lame.enc_padding - DEC_DELAY;
 		}
 
 	} else if (mpeg1_vbri_read(&xing, data.ptr, frsz) > 0) {

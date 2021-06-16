@@ -12,6 +12,7 @@ mpeg1_size
 mpeg1_find
 mpeg1_xing_read
 mpeg1_xing_seek
+mpeg1_xing_write
 mpeg1_lame_read
 mpeg1_vbri_read
 */
@@ -224,7 +225,7 @@ struct mpeg1_info {
 	ffuint frames;
 	ffuint bytes;
 	ffuint delay;
-	int vbr_scale; //100(worst)..0(best)
+	int vbr_scale; //-1:cbr; vbr: 100(worst)..0(best)
 	ffbyte toc[100];
 };
 
@@ -235,15 +236,14 @@ static inline int mpeg1_xing_read(struct mpeg1_info *info, const void *data, ffs
 {
 	const char *d = data;
 	ffuint i = mpeg1_xing_offset(data);
-	ffuint vbr;
 
 	if (i+4+4 > len)
 		return -1;
 
 	if (!ffmem_cmp(&d[i], "Xing", 4))
-		vbr = 1;
+		info->vbr_scale = 0;
 	else if (!ffmem_cmp(&d[i], "Info", 4))
-		vbr = 0;
+		info->vbr_scale = -1;
 	else
 		return -1;
 	i += 4;
@@ -268,9 +268,8 @@ static inline int mpeg1_xing_read(struct mpeg1_info *info, const void *data, ffs
 		i += 100;
 	}
 
-	info->vbr_scale = -1;
 	if (flags & MPEG1_XING_VBRSCALE) {
-		if (vbr)
+		if (info->vbr_scale == 0)
 			info->vbr_scale = ffint_be_cpu32_ptr(&d[i]);
 		i += 4;
 	}
@@ -290,6 +289,46 @@ static inline ffuint64 mpeg1_xing_seek(const ffbyte *toc, ffuint64 sample, ffuin
 	ffuint i2 = (i != 99) ? toc[i + 1] : 256;
 
 	return (i1 + (i2 - i1) * d) * total_size / 256.0;
+}
+
+/** Write Xing tag
+Note: struct mpeg1_info.toc isn't supported
+Return N of valid bytes */
+static inline int mpeg1_xing_write(const struct mpeg1_info *info, void *frame)
+{
+	char *d = frame;
+	ffuint off = mpeg1_xing_offset(frame);
+	ffuint i = off;
+
+	if (info->vbr_scale >= 0)
+		ffmem_copy(&d[i], "Xing", 4);
+	else
+		ffmem_copy(&d[i], "Info", 4);
+	i += 4;
+
+	ffuint flags = 0;
+	i += 4;
+
+	if (info->frames != 0) {
+		*(ffuint*)&d[i] = ffint_be_cpu32(info->frames);
+		i += 4;
+		flags |= MPEG1_XING_FRAMES;
+	}
+
+	if (info->bytes != 0) {
+		*(ffuint*)&d[i] = ffint_be_cpu32(info->bytes);
+		i += 4;
+		flags |= MPEG1_XING_BYTES;
+	}
+
+	if (info->vbr_scale != -1) {
+		*(ffuint*)&d[i] = ffint_be_cpu32(info->vbr_scale);
+		i += 4;
+		flags |= MPEG1_XING_VBRSCALE;
+	}
+
+	*(ffuint*)&d[off + 4] = ffint_be_cpu32(flags);
+	return i;
 }
 
 

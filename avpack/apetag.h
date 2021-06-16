@@ -193,3 +193,5 @@ static inline int apetagread_process(struct apetagread *a, ffstr *input, ffstr *
 
 	return APETAGREAD_ERROR;
 }
+
+#undef _APETAGREAD_ERR
