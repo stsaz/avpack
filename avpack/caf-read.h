@@ -25,13 +25,11 @@ cafread_tag
 typedef void (*caf_log_t)(void *udata, ffstr msg);
 
 typedef struct cafread {
-	ffuint state;
-	int err;
-
-	ffuint nxstate;
+	ffuint state, nxstate;
 	ffsize gathlen;
 	ffstr chunk;
 	ffvec buf;
+	const char *error;
 
 	ffuint64 inoff; // input offset
 	ffuint64 chunk_size; // current chunk size
@@ -49,6 +47,16 @@ typedef struct cafread {
 	void *udata;
 } cafread;
 
+enum CAFREAD_R {
+	CAFREAD_ERROR,
+	CAFREAD_MORE,
+	CAFREAD_MORE_OR_DONE, // can process more data if there's any
+	CAFREAD_SEEK,
+	CAFREAD_HEADER,
+	CAFREAD_TAG,
+	CAFREAD_DATA,
+	CAFREAD_DONE,
+};
 
 #define cafread_offset(c)  (c)->inoff
 #define cafread_cursample(c)  (c)->iframe
@@ -98,41 +106,14 @@ static inline void _cafread_log(cafread *c, const char *fmt, ...)
 }
 
 #define _CAFR_ERR(c, e) \
-	(c)->err = e,  CAFREAD_ERROR
-
-enum CAFREAD_E {
-	_CAFR_E_OK,
-	_CAFR_E_MEM,
-	_CAFR_E_HDR,
-	_CAFR_E_CHUNKSIZE,
-	_CAFR_E_CHUNKSMALL,
-	_CAFR_E_CHUNKLARGE,
-	_CAFR_E_ORDER,
-	_CAFR_E_ESDS,
-	_CAFR_E_DATA,
-};
+	(c)->error = e,  CAFREAD_ERROR
 
 static inline const char* cafread_error(cafread *c)
 {
-	static const char* const errors[] = {
-		"",
-		"not enough memory", // _CAFR_E_MEM
-		"bad header", // _CAFR_E_HDR
-		"bad chunk size", // _CAFR_E_CHUNKSIZE
-		"chunk too small", // _CAFR_E_CHUNKSMALL
-		"chunk too large", // _CAFR_E_CHUNKLARGE
-		"bad chunks order", // _CAFR_E_ORDER
-		"bad esds data", // _CAFR_E_ESDS
-		"bad audio chunk", // _CAFR_E_DATA
-	};
-
-	ffuint e = c->err;
-	if (e > FF_COUNT(errors))
-		return "";
-	return errors[e];
+	return c->error;
 }
 
-static int caf_chunk_find(const struct caf_chunk *cc, const struct caf_binchunk **pchunk)
+static int _cafr_chunk_find(cafread *c, const struct caf_chunk *cc, const struct caf_binchunk **pchunk)
 {
 	ffuint64 sz = ffint_be_cpu64_ptr(cc->size);
 
@@ -143,18 +124,18 @@ static int caf_chunk_find(const struct caf_chunk *cc, const struct caf_binchunk 
 			continue;
 
 		if (sz < ch->minsize)
-			return _CAFR_E_CHUNKSMALL;
+			return _CAFR_ERR(c, "chunk too small");
 
 		if ((ch->flags & CAF_FWHOLE) && sz > CAFREAD_CHUNK_MAXSIZE)
-			return _CAFR_E_CHUNKLARGE;
+			return _CAFR_ERR(c, "chunk too large");
 
 		if ((ch->flags & CAF_FEXACT) && sz != ch->minsize)
-			return _CAFR_E_CHUNKSIZE;
+			return _CAFR_ERR(c, "bad chunk size");
 
 		*pchunk = ch;
-		return 0;
+		return CAFREAD_DONE;
 	}
-	return 0;
+	return CAFREAD_DONE;
 }
 
 static void _cafr_gather(cafread *c, ffuint nxstate, ffsize len)
@@ -162,17 +143,6 @@ static void _cafr_gather(cafread *c, ffuint nxstate, ffsize len)
 	c->state = 1 /*R_GATHER*/;  c->nxstate = nxstate;
 	c->gathlen = len;
 }
-
-enum CAFREAD_R {
-	CAFREAD_ERROR,
-	CAFREAD_MORE,
-	CAFREAD_MORE_OR_DONE, // can process more data if there's any
-	CAFREAD_SEEK,
-	CAFREAD_HEADER,
-	CAFREAD_TAG,
-	CAFREAD_DATA,
-	CAFREAD_DONE,
-};
 
 /**
 Return enum CAFREAD_R */
@@ -196,7 +166,7 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 		case R_GATHER:
 			r = ffstr_gather((ffstr*)&c->buf, &c->buf.cap, input->ptr, input->len, c->gathlen, &c->chunk);
 			if (r < 0)
-				return _CAFR_ERR(c, _CAFR_E_MEM);
+				return _CAFR_ERR(c, "not enough memory");
 			ffstr_shift(input, r);
 			c->inoff += r;
 			if (c->chunk.len == 0)
@@ -207,7 +177,7 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 
 		case R_HDR:
 			if (0 != caf_hdr_read(c->chunk.ptr))
-				return _CAFR_ERR(c, _CAFR_E_HDR);
+				return _CAFR_ERR(c, "bad header");
 			_cafr_gather(c, R_CHUNK_HDR, sizeof(struct caf_chunk));
 			break;
 
@@ -218,9 +188,8 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 				, (ffsize)4, cc->type, c->chunk_size, c->inoff);
 
 			const struct caf_binchunk *ch = NULL;
-			r = caf_chunk_find(cc, &ch);
-			if (r != 0)
-				return _CAFR_ERR(c, r);
+			if (CAFREAD_DONE != (r = _cafr_chunk_find(c, cc, &ch)))
+				return r;
 
 			if (ch != NULL) {
 				int t = R_CHUNK + CAF_CHUNK_TYPE(ch->flags);
@@ -261,7 +230,7 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 		case R_CHUNK + CAF_T_KUKI: {
 			struct mp4_acodec ac;
 			if (0 != mp4_esds_read(c->chunk.ptr, c->chunk.len, &ac))
-				return _CAFR_ERR(c, _CAFR_E_ESDS);
+				return _CAFR_ERR(c, "bad esds data");
 
 			c->info.bitrate = ac.avg_brate;
 			ffstr_free(&c->info.codec_conf);
@@ -277,7 +246,7 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 			ffstr_dup2(&c->pakt, &c->chunk);
 
 			if (c->info.sample_rate == 0)
-				return _CAFR_ERR(c, _CAFR_E_ORDER);
+				return _CAFR_ERR(c, "bad chunks order");
 
 			_cafr_gather(c, R_CHUNK_HDR, sizeof(struct caf_chunk));
 			break;
@@ -298,7 +267,7 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 				if (r == 0)
 					return CAFREAD_DONE;
 				if (r < 0)
-					return _CAFR_ERR(c, _CAFR_E_DATA);
+					return _CAFR_ERR(c, "bad audio chunk");
 				c->pakt_off += r;
 			}
 
@@ -306,9 +275,9 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 				, c->ipkt, sz, c->inoff);
 
 			if (sz > c->chunk_size)
-				return _CAFR_ERR(c, _CAFR_E_DATA);
+				return _CAFR_ERR(c, "bad audio chunk");
 			if (sz > CAFREAD_ACHUNK_MAXSIZE)
-				return _CAFR_ERR(c, _CAFR_E_CHUNKLARGE);
+				return _CAFR_ERR(c, "chunk too large");
 
 			c->ipkt++;
 			if ((ffint64)c->chunk_size != -1)
