@@ -19,6 +19,7 @@ Contents:
 * read/write meta tags, audio track info
 * read/write audio frames
 * convenient for asynchronous I/O model (no I/O callback functions)
+* .aac read: `avpack/aac-read.h`
 * .avi read: `avpack/avi-read.h`
 * .caf read: `avpack/caf-read.h`
 * .mkv read: `avpack/mkv-read.h`

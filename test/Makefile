@@ -55,6 +55,7 @@ ifeq ($(OS),win)
 	TESTER := $(OUT_DIR)/avpack-test.exe
 endif
 OBJ := \
+	$(OUT_DIR)/aac.o \
 	$(OUT_DIR)/avi.o \
 	$(OUT_DIR)/caf.o \
 	$(OUT_DIR)/main.o \
@@ -71,7 +72,7 @@ clean:
 	$(RM) $(TESTER) $(OBJ)
 
 CFLAGS := -I$(AVPACK_DIR) -I$(FFBASE_DIR) \
-	-Wall -Wextra -Werror -fvisibility=hidden
+	-Wall -Wextra -fvisibility=hidden
 CFLAGS += -DFF_DEBUG -O0 -g
 CXXFLAGS := $(CFLAGS)
 CFLAGS += -std=gnu99
