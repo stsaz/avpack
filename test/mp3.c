@@ -9,6 +9,37 @@
 extern int Verbose;
 
 const char mpeg_frame[422] = {"skip\xff\xfb\x92\x64" "mpegframe1"};
+const char mpeg_sample[] = {
+"junk"
+"\xff\xfb\x92\x64" "mpegframe1    "
+"                                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+"\xff\x00" // bad header
+"\xff\xfb\x92\x64" "mpegframe2    "
+"                                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+"\xff\xfb\x92\x64" "mpegframe3    "
+"                                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+"                                                  "
+};
 
 struct tag {
 	ffuint name;
@@ -80,14 +111,14 @@ end:
 void test_mp3_read(ffstr data)
 {
 	int r;
-	ffstr in, out;
+	ffstr in = {}, out;
 	mp3read m = {};
 	// m.log = mpegr_log;
 	mp3read_open(&m, data.len);
-	// ffstr_set(&in, data.ptr, 1);
-	ffstr_set(&in, data.ptr, data.len);
 	ffuint off = 1;
 	const struct mpeg1read_info *info;
+	int frno = 0;
+	int partial = 0;
 
 	for (int i = data.len*2;;  i--) {
 		x(i >= 0);
@@ -126,7 +157,7 @@ void test_mp3_read(ffstr data)
 			break;
 
 		case MPEG1READ_DATA:
-			x(ffstr_eq(&out, mpeg_frame+4, sizeof(mpeg_frame)-4));
+			printf("frame#%d:%u\n", frno++, (int)out.len);
 			break;
 
 		case MPEG1READ_SEEK:
@@ -135,12 +166,14 @@ void test_mp3_read(ffstr data)
 		case MPEG1READ_MORE:
 			if (off == data.len)
 				goto end;
-			// ffstr_set(&in, data.ptr + off, 1);
-			ffstr_set(&in, data.ptr + off, data.len - off);
-			off++;
+			ffstr_setstr(&in, &data);
+			ffstr_shift(&in, off);
+			if (partial)
+				ffstr_set(&in, data.ptr + off, 1);
+			off += in.len;
 			break;
 
-		case MPEG1READ_DONE:
+		case MP3READ_DONE:
 			goto end;
 
 		default:
@@ -189,7 +222,7 @@ void test_mpeg_seek(ffstr data, ffuint delta)
 			off++;
 			break;
 
-		case MPEG1READ_DONE:
+		case MP3READ_DONE:
 			goto end;
 
 		default:
@@ -281,6 +314,9 @@ void test_mp3()
 	}
 
 	ffstr data = FFSTR_INITSTR(&buf);
+	test_mp3_read(data);
+
+	ffstr_set(&data, mpeg_sample, sizeof(mpeg_sample)-1);
 	test_mp3_read(data);
 
 #if 0

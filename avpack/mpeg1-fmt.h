@@ -84,9 +84,11 @@ static inline int mpeg1_valid(const void *h)
 
 static inline int mpeg1_match(const void *h, const void *h2)
 {
-	//bits in each MPEG header that must not change across frames within the same stream
-	ffuint mask = 0xfffe0c00; // 1111 1111  1111 1110  0000 1100  0000 0000
-	return (ffint_be_cpu32_ptr(h) & mask) == (ffint_be_cpu32_ptr(h2) & mask);
+	// bits in each MPEG header that must not change across frames within the same stream
+	// SSSS SSSS  SSSV VLL.  BBBB RR
+	// 1111 1111  1111 1110  0000 1100  0000 0000
+	ffuint mask = ffint_be_cpu32(0xfffe0c00);
+	return (*(ffuint*)h & mask) == (*(ffuint*)h2 & mask);
 }
 
 /** Get bitrate (bps) */
@@ -170,6 +172,7 @@ static inline int mpeg1_find(ffstr data)
 				break;
 			i += r;
 		}
+
 		if (i + 4 > data.len)
 			break;
 		if (mpeg1_valid(&data.ptr[i]))

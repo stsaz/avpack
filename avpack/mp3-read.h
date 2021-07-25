@@ -64,6 +64,7 @@ enum MP3READ_R {
 	MP3READ_ID32,
 	MP3READ_APETAG,
 	MP3READ_WARN,
+	MP3READ_DONE,
 };
 
 /**
@@ -203,8 +204,8 @@ static inline int mp3read_process(mp3read *m, ffstr *input, ffstr *output)
 			m->off = m->data_off + mpeg1read_offset(&m->rd);
 			switch (r) {
 			case MPEG1READ_MORE:
-				if (m->off >= m->total_size)
-					return MPEG1READ_DONE;
+				if (m->total_size != 0 && m->off >= m->total_size)
+					return MP3READ_DONE;
 				break;
 			}
 			return r;
