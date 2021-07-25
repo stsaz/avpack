@@ -13,7 +13,7 @@ static ffssize _avpack_gather_header(ffstr *buf, ffstr in, ffsize total, ffstr *
 	}
 
 	if (total <= buf->len) {
-		ffstr_set(out, buf->ptr, total);
+		ffstr_setstr(out, buf);
 		return 0;
 	}
 
@@ -39,7 +39,7 @@ static ffssize _avpack_gather_trailer(ffstr *buf, ffstr in, ffsize total, ffsize
 		return 0;
 	}
 
-	ffsize n = ffmin(total-1, in.len);
+	ffsize n = ffmin(total-1, in.len + hdr_shifted);
 	ffmem_copy(&buf->ptr[buf->len], &in.ptr[in.len - n], n);
 	buf->len += n;
 	return in.len;
