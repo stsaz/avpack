@@ -11,6 +11,7 @@ extern void test_caf();
 extern void test_mkv();
 extern void test_mp3();
 extern void test_mp4();
+extern void test_mpc();
 extern void test_ogg();
 extern void test_wav();
 
@@ -26,6 +27,7 @@ static const struct test atests[] = {
 	T(mkv),
 	T(mp3),
 	T(mp4),
+	T(mpc),
 	T(ogg),
 	T(wav),
 };

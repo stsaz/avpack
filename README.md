@@ -25,6 +25,7 @@ Contents:
 * .mkv read: `avpack/mkv-read.h`
 * .mp3 read/write: `avpack/mp3-read.h`, `avpack/mp3-write.h`
 * .mp4/.m4a/.mov read/write: `avpack/mp4-read.h`, `avpack/mp4-write.h`
+* .mpc read: `avpack/mpc-read.h`
 * .ogg/.opus read/write: `avpack/ogg-read.h`, `avpack/ogg-write.h`
 * .wav read/write: `avpack/wav-read.h`, `avpack/wav-write.h`
 * APETAG read: `avpack/apetag.h`

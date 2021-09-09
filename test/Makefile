@@ -62,6 +62,7 @@ OBJ := \
 	$(OUT_DIR)/mkv.o \
 	$(OUT_DIR)/mp3.o \
 	$(OUT_DIR)/mp4.o \
+	$(OUT_DIR)/mpc.o \
 	$(OUT_DIR)/ogg.o \
 	$(OUT_DIR)/wav.o \
 	$(OUT_DIR)/compat.o
