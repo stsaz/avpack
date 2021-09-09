@@ -17,6 +17,7 @@ apetagread_error
 #pragma once
 
 #include <avpack/mmtag.h>
+#include <ffbase/vector.h>
 #include <ffbase/stringz.h>
 
 struct apetaghdr {

@@ -176,6 +176,7 @@ static inline int mp3read_process(mp3read *m, ffstr *input, ffstr *output)
 			case APETAGREAD_MORE:
 				return MPEG1READ_MORE;
 			case APETAGREAD_DONE:
+				apetagread_close(&m->apetag);
 				m->state = R_HDR_SEEK;
 				break;
 			case APETAGREAD_ERROR:
