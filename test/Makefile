@@ -58,6 +58,7 @@ OBJ := \
 	$(OUT_DIR)/aac.o \
 	$(OUT_DIR)/avi.o \
 	$(OUT_DIR)/caf.o \
+	$(OUT_DIR)/cue.o \
 	$(OUT_DIR)/main.o \
 	$(OUT_DIR)/mkv.o \
 	$(OUT_DIR)/mp3.o \
