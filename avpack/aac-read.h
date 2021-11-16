@@ -65,7 +65,7 @@ static inline const char* aacread_error(aacread *a)
 
 static inline void aacread_open(aacread *a)
 {
-	ffvec_alloc(&a->buf, 4096, 1);
+	(void)a;
 }
 
 static inline void aacread_close(aacread *a)
@@ -204,47 +204,37 @@ static int aacadts_mp4asc(char *dst, const struct aacadts_hdr *h)
 }
 
 /** Find header */
-static int _aacread_hdr_find(aacread *a, ffstr *input)
+static int _aacread_hdr_find(aacread *a, ffstr *input, ffstr *out)
 {
-	int r;
+	int r, pos;
 	ffstr chunk = {};
 	struct aacadts_hdr h;
 
 	for (;;) {
 
-		r = _avpack_gather_header((ffstr*)&a->buf, *input, 7, &chunk);
-		int hdr_shifted = r;
+		r = _avpack_gather_header(&a->buf, *input, 7, &chunk);
 		ffstr_shift(input, r);
 		a->off += r;
-		if (chunk.len == 0) {
-			ffstr_null(&a->chunk);
-			return AACREAD_MORE;
-		}
+		if (chunk.len == 0)
+			return 0xfeed;
 
-		r = aacadts_find(chunk, &h);
-		if (r >= 0) {
-			if (chunk.ptr != a->buf.ptr) {
-				ffstr_shift(input, r);
-				a->off += r;
-			}
-			ffstr_shift(&chunk, r);
+		pos = aacadts_find(chunk, &h);
+		if (pos >= 0)
 			break;
-		}
 
-		r = _avpack_gather_trailer((ffstr*)&a->buf, *input, 7, hdr_shifted);
+		r = _avpack_gather_trailer(&a->buf, *input, 7, r);
 		// r<0: ffstr_shift() isn't suitable due to assert()
 		input->ptr += r,  input->len -= r;
 		a->off += r;
 	}
 
-	ffstr_set(&a->chunk, chunk.ptr, 7);
-	if (a->buf.len != 0) {
-		ffstr_erase_left((ffstr*)&a->buf, r);
-		ffstr_set(&a->chunk, a->buf.ptr, 7);
+	if (chunk.ptr == input->ptr) {
+		ffstr_shift(input, 7 + pos);
+		a->off += 7 + pos;
 	}
-
+	ffstr_set(out, &chunk.ptr[pos], 7);
 	a->frlen = h.framelen;
-	return 0xdeed;
+	return 0;
 }
 
 /** Return enum AACREAD_R */
@@ -262,8 +252,9 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 
 		case R_GATHER_MORE:
 			if (a->buf.len == 0) {
-				if (a->chunk.len != ffvec_add2T(&a->buf, &a->chunk, char))
-					return a->error = "not enough memory",  AACREAD_ERROR;
+				FF_ASSERT(&a->chunk.ptr[a->chunk.len] == input->ptr);
+				input->ptr -= a->chunk.len,  input->len += a->chunk.len;
+				a->off -= a->chunk.len;
 			}
 			a->state = R_GATHER;
 			// fallthrough
@@ -279,10 +270,12 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 			continue;
 
 		case R_HDR_FIND:
-			r = _aacread_hdr_find(a, input);
-			if (r == AACREAD_MORE)
+			r = _aacread_hdr_find(a, input, &a->chunk);
+			if (r == 0xfeed)
 				return AACREAD_MORE;
 
+			if (a->buf.len != 0)
+				ffstr_erase_left((ffstr*)&a->buf, a->chunk.ptr - (char*)a->buf.ptr);
 			a->state = R_GATHER_MORE,  a->nextstate = R_HDR2,  a->gather_size = a->frlen + 7;
 			continue;
 
@@ -290,13 +283,15 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 			const void *h2 = &a->chunk.ptr[a->frlen];
 			if (!(0 == aacadts_parse(&h, h2)
 				&& aacadts_match(a->chunk.ptr, h2))) {
+
 				if (a->buf.len != 0) {
 					ffstr_erase_left((ffstr*)&a->buf, 1);
 				} else if (&a->chunk.ptr[a->chunk.len] == input->ptr) {
 					ffuint n = a->chunk.len - 1;
-					input->ptr += n,  input->len -= n;
+					input->ptr -= n,  input->len += n;
 					a->off -= n;
 				}
+
 				a->state = R_HDR_FIND;
 				continue;
 			}

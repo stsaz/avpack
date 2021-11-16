@@ -24,7 +24,7 @@ ffvec test_ogg_write()
 
 	for (;;) {
 		r = oggwrite_process(&o, &in, &out, endpos, flags);
-		// printf("oggwrite_process: %d\n", r);
+		// xlog("oggwrite_process: %d", r);
 		switch (r) {
 		case OGGWRITE_DATA:
 			ffvec_grow(&v, out.len, 1);
@@ -51,25 +51,24 @@ end:
 static void oggr_log(void *udata, ffstr msg)
 {
 	(void)udata;
-	printf("%.*s\n", (int)msg.len, msg.ptr);
+	xlog("%S", &msg);
 }
 
-void test_ogg_read(ffstr data)
+void test_ogg_read(ffstr data, int partial)
 {
 	int r;
-	ffstr in, out;
+	ffstr in = {}, out;
 	oggread o = {};
 	o.log = oggr_log;
 	oggread_open(&o, data.len);
-	ffstr_set(&in, data.ptr, 1);
-	ffuint off = 1;
+	ffuint off = 0;
 	const struct oggread_info *info;
 
 	for (int i = data.len*2;;  i--) {
 		x(i >= 0);
 
 		r = oggread_process(&o, &in, &out);
-		// printf("oggread_process: %d\n", r);
+		// xlog("oggread_process: %d", r);
 		switch (r) {
 
 		case OGGREAD_HEADER:
@@ -84,15 +83,18 @@ void test_ogg_read(ffstr data)
 			off = oggread_offset(&o);
 			// fallthrough
 		case OGGREAD_MORE:
-			ffstr_set(&in, data.ptr + off, 1);
-			off++;
+			ffstr_setstr(&in, &data);
+			ffstr_shift(&in, off);
+			if (partial)
+				ffstr_set(&in, data.ptr + off, ffmin(partial, data.len - off));
+			off += in.len;
 			break;
 
 		case OGGREAD_DONE:
 			goto end;
 
 		default:
-			printf("error: oggread_process: %s\n", oggread_error(&o));
+			xlog("error: oggread_process: %s", oggread_error(&o));
 			x(0);
 		}
 	}
@@ -101,22 +103,21 @@ end:
 	oggread_close(&o);
 }
 
-void test_ogg_seek(ffstr data, ffuint delta)
+void test_ogg_seek(ffstr data, ffuint delta, int partial)
 {
 	int r;
-	ffstr in, out;
+	ffstr in = {}, out;
 	oggread o = {};
 	o.log = oggr_log;
 	oggread_open(&o, data.len);
 	ffuint seek = 0;
-	ffstr_set(&in, data.ptr, 1);
-	ffuint off = 1;
+	ffuint off = 0;
 	const struct oggread_info *info;
 	ffuint reqs = 0, fileseek = 0;
 
 	for (;;) {
 		r = oggread_process(&o, &in, &out);
-		// printf("oggread_process: %d\n", r);
+		// xlog("oggread_process: %d", r);
 		switch (r) {
 		case OGGREAD_HEADER:
 			info = oggread_info(&o);
@@ -130,28 +131,31 @@ void test_ogg_seek(ffstr data, ffuint delta)
 				goto end;
 			reqs++;
 			oggread_seek(&o, seek);
-			printf("\noggread: seeking to: %u\n", seek);
+			xlog("oggread: seeking to: %u", seek);
 			break;
 		case OGGREAD_SEEK:
 			fileseek++;
 			off = oggread_offset(&o);
 			// fallthrough
 		case OGGREAD_MORE:
-			ffstr_set(&in, data.ptr + off, 1);
-			off++;
+			ffstr_setstr(&in, &data);
+			ffstr_shift(&in, off);
+			if (partial)
+				ffstr_set(&in, data.ptr + off, ffmin(partial, data.len - off));
+			off += in.len;
 			break;
 
 		case OGGREAD_DONE:
 			goto end;
 
 		default:
-			printf("error: oggread_process: %s\n", oggread_error(&o));
+			xlog("error: oggread_process: %s", oggread_error(&o));
 			x(0);
 		}
 	}
 
 end:
-	printf("oggread: seek-reqs:%u  avg-file-seek-reqs:%u\n"
+	xlog("oggread: seek-reqs:%u  avg-file-seek-reqs:%u"
 		, reqs, fileseek/reqs);
 	oggread_close(&o);
 }
@@ -163,12 +167,13 @@ void test_ogg()
 
 	if (Verbose) {
 		ffstr s = ffmem_print(buf.ptr, buf.len, FFMEM_PRINT_ZEROSPACE);
-		printf("%.*s\n", (int)s.len, s.ptr);
+		xlog("%S", &s);
 		ffstr_free(&s);
 	}
 
 	ffstr data = FFSTR_INITSTR(&buf);
-	test_ogg_read(data);
+	test_ogg_read(data, 0);
+	test_ogg_read(data, 3);
 
 #if 0
 	data.ptr = NULL;

@@ -69,47 +69,44 @@ enum MPEG1READ_R {
 };
 
 /** Find MPEG header */
-static int _mpeg1read_hdr_find(mpeg1read *m, ffstr *input)
+static int _mpeg1read_hdr_find(mpeg1read *m, ffstr *input, ffstr *output)
 {
-	int r;
+	int r, pos;
 	ffstr chunk = {};
 
 	for (;;) {
 
-		r = _avpack_gather_header((ffstr*)&m->buf, *input, 4, &chunk);
-		int hdr_shifted = r;
+		r = _avpack_gather_header(&m->buf, *input, 4, &chunk);
 		ffstr_shift(input, r);
 		m->off += r;
 		if (chunk.len == 0) {
-			ffstr_null(&m->chunk);
-			return MPEG1READ_MORE;
+			ffstr_null(output);
+			return 0xfeed;
 		}
 
-		r = mpeg1_find(chunk);
-		if (r != 0)
+		pos = mpeg1_find(chunk);
+		if (pos != 0)
 			m->unrecognized_data = 1;
-		if (r >= 0) {
-			if (chunk.ptr != m->buf.ptr) {
-				ffstr_shift(input, r);
-				m->off += r;
-			}
-			ffstr_shift(&chunk, r);
+		if (pos >= 0)
 			break;
-		}
 
-		r = _avpack_gather_trailer((ffstr*)&m->buf, *input, 4, hdr_shifted);
+		r = _avpack_gather_trailer(&m->buf, *input, 4, r);
 		// r<0: ffstr_shift() isn't suitable due to assert()
 		input->ptr += r,  input->len -= r;
 		m->off += r;
 	}
 
-	ffstr_set(&m->chunk, chunk.ptr, 4);
+	if (chunk.ptr == input->ptr) {
+		ffstr_shift(input, 4 + pos);
+		m->off += 4 + pos;
+	}
+	ffstr_set(output, &chunk.ptr[pos], 4);
 	if (m->buf.len != 0) {
-		ffstr_erase_left((ffstr*)&m->buf, r);
-		ffstr_set(&m->chunk, m->buf.ptr, 4);
+		ffstr_erase_left((ffstr*)&m->buf, pos);
+		ffstr_set(output, m->buf.ptr, 4);
 	}
 
-	return 0xdeed;
+	return 0;
 }
 
 static inline const char* mpeg1read_error(mpeg1read *m)
@@ -207,8 +204,8 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 			continue;
 
 		case R_HDR_FIND:
-			r = _mpeg1read_hdr_find(m, input);
-			if (r == MPEG1READ_MORE)
+			r = _mpeg1read_hdr_find(m, input, &m->chunk);
+			if (r == 0xfeed)
 				return MPEG1READ_MORE;
 
 			if (m->unrecognized_data) {

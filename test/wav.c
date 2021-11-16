@@ -25,7 +25,7 @@ ffvec test_wav_write()
 
 	for (;;) {
 		r = wavwrite_process(&w, &in, &out);
-		// printf("wavwrite_process: %d\n", r);
+		// xlog("wavwrite_process: %d", r);
 		switch (r) {
 		case WAVWRITE_HEADER:
 		case WAVWRITE_DATA:
@@ -44,7 +44,7 @@ ffvec test_wav_write()
 			wavwrite_finish(&w);
 			break;
 		default:
-			printf("err: %s\n", wavwrite_error(&w));
+			xlog("err: %s", wavwrite_error(&w));
 			x(0);
 		}
 	}
@@ -57,22 +57,23 @@ end:
 static void wavr_log(void *udata, ffstr msg)
 {
 	(void)udata;
-	printf("%.*s\n", (int)msg.len, msg.ptr);
+	xlog("%S", &msg);
 }
 
-void test_wav_read(ffstr data)
+void test_wav_read(ffstr data, int partial)
 {
 	int r;
-	ffstr in, out;
+	ffstr in = {}, out;
 	wavread w = {};
 	w.log = wavr_log;
 	wavread_open(&w);
-	ffstr_set(&in, data.ptr, 1);
-	ffuint off = 1;
+	ffuint off = 0;
 
-	for (;;) {
+	for (int i = data.len*2;;  i--) {
+		x(i >= 0);
+
 		r = wavread_process(&w, &in, &out);
-		// printf("wavread_process: %d\n", r);
+		// xlog("wavread_process: %d", r);
 		switch (r) {
 		case WAVREAD_HEADER: {
 			const struct wav_info *wi = wavread_info(&w);
@@ -85,9 +86,7 @@ void test_wav_read(ffstr data)
 		case WAVREAD_TAG: {
 			ffstr val;
 			ffuint t = wavread_tag(&w, &val);
-			printf("wavread_tag: %d = %.*s\n"
-				, t
-				, (int)val.len, val.ptr);
+			xlog("wavread_tag: %d = %S", t, &val);
 			break;
 		}
 
@@ -95,20 +94,25 @@ void test_wav_read(ffstr data)
 			off = wavread_offset(&w);
 			// fallthrough
 		case WAVREAD_MORE:
-			ffstr_set(&in, data.ptr + off, 1);
-			off++;
+			ffstr_setstr(&in, &data);
+			ffstr_shift(&in, off);
+			if (partial)
+				ffstr_set(&in, data.ptr + off, ffmin(partial, data.len - off));
+			off += in.len;
 			break;
 
 		default:
-			printf("err: %s\n", wavread_error(&w));
+			xlog("err: %s", wavread_error(&w));
 			x(0);
 		}
 	}
 
 next:
-	for (;;) {
+	for (int i = data.len*2;;  i--) {
+		x(i >= 0);
+
 		r = wavread_process(&w, &in, &out);
-		// printf("wavread_process: %d\n", r);
+		// xlog("wavread_process: %d", r);
 		switch (r) {
 		case WAVREAD_DATA:
 			x(0 == wavread_cursample(&w));
@@ -122,12 +126,15 @@ next:
 			off = wavread_offset(&w);
 			// fallthrough
 		case WAVREAD_MORE:
-			ffstr_set(&in, data.ptr + off, 1);
-			off++;
+			ffstr_setstr(&in, &data);
+			ffstr_shift(&in, off);
+			if (partial)
+				ffstr_set(&in, data.ptr + off, ffmin(partial, data.len - off));
+			off += in.len;
 			break;
 
 		default:
-			printf("err: %s\n", wavread_error(&w));
+			xlog("err: %s", wavread_error(&w));
 			x(0);
 		}
 	}
@@ -145,12 +152,13 @@ void test_wav()
 
 	if (Verbose) {
 		ffstr s = ffmem_print(buf.ptr, buf.len, FFMEM_PRINT_ZEROSPACE);
-		printf("%.*s\n", (int)s.len, s.ptr);
+		xlog("%S", &s);
 		ffstr_free(&s);
 	}
 
 	ffstr data = FFSTR_INITSTR(&buf);
-	test_wav_read(data);
+	test_wav_read(data, 0);
+	test_wav_read(data, 3);
 
 	ffvec_free(&buf);
 }

@@ -110,7 +110,7 @@ static inline void oggread_close(oggread *o)
 Return full header size. Shift 'input' so it points to header's segments. */
 static int _oggread_hdr_find(oggread *o, const struct ogg_hdr **h, ffstr *input)
 {
-	int r;
+	int r, pos;
 	ffstr chunk;
 
 	if (o->chunk_processed) {
@@ -121,8 +121,7 @@ static int _oggread_hdr_find(oggread *o, const struct ogg_hdr **h, ffstr *input)
 
 	for (;;) {
 
-		r = _avpack_gather_header((ffstr*)&o->buf, *input, sizeof(struct ogg_hdr), &chunk);
-		int hdr_shifted = r;
+		r = _avpack_gather_header(&o->buf, *input, sizeof(struct ogg_hdr), &chunk);
 		ffstr_shift(input, r);
 		o->off += r;
 		if (chunk.len == 0) {
@@ -130,28 +129,28 @@ static int _oggread_hdr_find(oggread *o, const struct ogg_hdr **h, ffstr *input)
 			return 0;
 		}
 
-		r = ogg_hdr_find(chunk);
-		if (r != 0)
+		pos = ogg_hdr_find(chunk);
+		if (pos != 0)
 			o->unrecognized_data = 1;
-		if (r >= 0) {
-			if (chunk.ptr != o->buf.ptr) {
-				ffstr_shift(input, r);
-				o->off += r;
-			}
-			ffstr_shift(&chunk, r);
+		if (pos >= 0)
 			break;
-		}
 
-		r = _avpack_gather_trailer((ffstr*)&o->buf, *input, sizeof(struct ogg_hdr), hdr_shifted);
+		r = _avpack_gather_trailer(&o->buf, *input, sizeof(struct ogg_hdr), r);
 		// r<0: ffstr_shift() isn't suitable due to assert()
 		input->ptr += r;
 		input->len -= r;
 		o->off += r;
 	}
 
-	const struct ogg_hdr *hdr = (struct ogg_hdr*)(chunk.ptr + r);
+	if (chunk.ptr == input->ptr) {
+		ffstr_shift(input, sizeof(struct ogg_hdr) + pos);
+		o->off += sizeof(struct ogg_hdr) + pos;
+	}
+	ffstr_shift(&chunk, pos);
+
+	const struct ogg_hdr *hdr = (struct ogg_hdr*)(chunk.ptr);
 	if (o->buf.len != 0) {
-		ffstr_erase_left((ffstr*)&o->buf, r);
+		ffstr_erase_left((ffstr*)&o->buf, pos);
 		hdr = (struct ogg_hdr*)o->buf.ptr;
 	}
 	*h = hdr;

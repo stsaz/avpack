@@ -380,25 +380,27 @@ const ffbyte avi_sample[] = {
 static void avir_log(void *udata, ffstr msg)
 {
 	(void)udata;
-	printf("%.*s\n", (int)msg.len, msg.ptr);
+	xlog("%S", &msg);
 }
 
-void test_avi_read(ffstr data)
+void test_avi_read(ffstr data, int partial)
 {
 	int r;
-	ffstr in, out;
+	ffstr in = {}, out;
 	aviread a = {};
 	a.log = avir_log;
 	aviread_open(&a);
-	ffstr_set(&in, data.ptr, 1);
-	ffuint off = 1;
+	ffuint off = 0;
 	ffuint track_total = 1;
 	ffuint track_audio = 0;
 	ffuint itag = 0;
+	ffuint frno = 0;
 
-	for (;;) {
+	for (int i = data.len*2;;  i--) {
+		x(i >= 0);
+
 		r = aviread_process(&a, &in, &out);
-		// printf("aviread_process: %d\n", r);
+		// xlog("aviread_process: %d", r);
 		switch (r) {
 		case AVIREAD_HEADER: {
 			const struct avi_audio_info *ti = aviread_track_info(&a, track_audio);
@@ -415,9 +417,7 @@ void test_avi_read(ffstr data)
 		case AVIREAD_TAG: {
 			ffstr val;
 			int t = aviread_tag(&a, &val);
-			printf("aviread_tag: %d = %.*s\n"
-				, t
-				, (int)val.len, val.ptr);
+			xlog("aviread_tag: %d = %S", t, &val);
 			switch (itag++) {
 			case 0:
 				xieq(MMTAG_ARTIST, t);
@@ -432,32 +432,39 @@ void test_avi_read(ffstr data)
 		}
 
 		case AVIREAD_MORE:
-			ffstr_set(&in, data.ptr + off, 1);
-			off++;
+			ffstr_setstr(&in, &data);
+			ffstr_shift(&in, off);
+			if (partial)
+				ffstr_set(&in, data.ptr + off, ffmin(partial, data.len - off));
+			off += in.len;
 			break;
 
 		default:
-			printf("aviread_process: %s\n", aviread_error(&a));
+			xlog("aviread_process: %s", aviread_error(&a));
 			x(0);
 		}
 	}
 
 next:
-	aviread_track_activate(&a, 1);
+	aviread_track_activate(&a, 0);
 	for (;;) {
 		r = aviread_process(&a, &in, &out);
-		// printf("aviread_process: %d\n", r);
+		// xlog("aviread_process: %d", r);
 		switch (r) {
 		case AVIREAD_DATA:
 			// xseq(&out, "aacframe1");
-			printf("frame:%u curpos=%u\n", (int)out.len, (int)aviread_cursample(&a));
+			frno++;
+			xlog("frame:%u curpos=%u", (int)out.len, (int)aviread_cursample(&a));
 			break;
 		case AVIREAD_DONE:
 			goto end;
 
 		case AVIREAD_MORE:
-			ffstr_set(&in, data.ptr + off, 1);
-			off++;
+			ffstr_setstr(&in, &data);
+			ffstr_shift(&in, off);
+			if (partial)
+				ffstr_set(&in, data.ptr + off, ffmin(partial, data.len - off));
+			off += in.len;
 			break;
 
 		default:
@@ -468,6 +475,7 @@ next:
 	//aviread_seek
 
 end:
+	x(frno != 0);
 	aviread_close(&a);
 }
 
@@ -480,5 +488,6 @@ void test_avi()
 	x(0 == file_readall("/tmp/1.avi", &data));
 #endif
 
-	test_avi_read(data);
+	test_avi_read(data, 0);
+	test_avi_read(data, 3);
 }

@@ -116,7 +116,7 @@ static inline void _mp4write_log(const char *fmt, ...)
 	ffstr_growfmtv(&s, &cap, fmt, va);
 	va_end(va);
 
-	printf("mp4write: %.*s\n", (int)s.len, s.ptr);
+	xlog("mp4write: %S", &s);
 	ffstr_free(&s);
 #endif
 }

@@ -513,7 +513,7 @@ static int _mkvread_el_close(mkvread *m)
 
 	case MKV_T_TITLE:
 		ffvec_free(&m->tagname);
-		ffstr_setz(&m->tagname, "title");
+		ffstr_setz((ffstr*)&m->tagname, "title");
 		return MKVREAD_TAG;
 
 	case MKV_T_TAG:
@@ -550,43 +550,40 @@ static ffuint64 _mkvr_seek_offset(const struct _mkvread_seekpoint *pt, ffuint64 
 }
 
 /** Find Cluster element */
-static int _mkvr_seek_sync(mkvread *m, ffstr *input)
+static int _mkvr_seek_sync(mkvread *m, ffstr *input, ffstr *output)
 {
-	int r;
+	int r, pos;
 	ffstr chunk;
 	for (;;) {
 
-		r = _avpack_gather_header((ffstr*)&m->buf, *input, 4, &chunk);
-		int hdr_shifted = r;
+		r = _avpack_gather_header(&m->buf, *input, 4, &chunk);
 		ffstr_shift(input, r);
 		m->off += r;
 
 		if (chunk.len == 0) {
-			ffstr_null(&m->gbuf);
-			return MKVREAD_MORE;
+			ffstr_null(output);
+			return 0xfeed;
 		}
 
-		r = ffstr_find(&chunk, "\x1f\x43\xb6\x75", 4);
-		if (r >= 0) {
-			if (chunk.ptr != m->buf.ptr) {
-				ffstr_shift(input, r);
-				m->off += r;
-			}
-			ffstr_shift(&chunk, r);
+		pos = ffstr_find(&chunk, "\x1f\x43\xb6\x75", 4);
+		if (pos >= 0)
 			break;
-		}
 
-		r = _avpack_gather_trailer((ffstr*)&m->buf, *input, 4, hdr_shifted);
+		r = _avpack_gather_trailer(&m->buf, *input, 4, r);
 		// r<0: ffstr_shift() isn't suitable due to assert()
 		input->ptr += r;
 		input->len -= r;
 		m->off += r;
 	}
 
-	ffstr_set(&m->gbuf, chunk.ptr, 4);
+	if (chunk.ptr == input->ptr) {
+		ffstr_shift(input, 4 + pos);
+		m->off += 4 + pos;
+	}
+	ffstr_set(output, &chunk.ptr[pos], 4);
 	if (m->buf.len != 0) {
-		ffstr_erase_left((ffstr*)&m->buf, r);
-		ffstr_set(&m->gbuf, m->buf.ptr, 4);
+		ffstr_erase_left((ffstr*)&m->buf, pos);
+		ffstr_set(output, m->buf.ptr, 4);
 	}
 	return 0;
 }
@@ -650,13 +647,9 @@ static int _mkvr_seek_adjust(mkvread *m, struct _mkvread_seekpoint *sp)
 		, m->clust_off
 		, sp[0].off, sp[1].off, sp[1].off - sp[0].off);
 
-	if (m->seek_msec >= m->clust_time) {
-		sp[0].pos = m->clust_time;
-		sp[0].off = m->clust_off;
-	} else {
-		sp[1].pos = m->clust_time;
-		sp[1].off = m->clust_off;
-	}
+	int i = (m->seek_msec < m->clust_time);
+	sp[i].pos = m->clust_time;
+	sp[i].off = m->clust_off;
 
 	if (sp[0].off >= sp[1].off)
 		return 1;
@@ -837,7 +830,7 @@ static inline int mkvread_process(mkvread *m, ffstr *input, ffstr *output)
 			return MKVREAD_SEEK;
 
 		case R_SEEK_SYNC: {
-			r = _mkvr_seek_sync(m, input);
+			r = _mkvr_seek_sync(m, input, &m->gbuf);
 
 			int r2 = _mkvr_seek_adjust_edge(m, m->seekpt);
 			if (r2 == 0xdeed) {
@@ -846,7 +839,7 @@ static inline int mkvread_process(mkvread *m, ffstr *input, ffstr *output)
 			} else if (r2 == MKVREAD_SEEK)
 				return MKVREAD_SEEK;
 
-			if (r == MKVREAD_MORE)
+			if (r == 0xfeed)
 				return MKVREAD_MORE;
 
 			m->gsize = 4+8+1+1+8; // cluster.id, cluster.size, time.id, time.size, time.value

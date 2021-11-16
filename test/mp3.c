@@ -1,4 +1,4 @@
-/** avpack: .mpeg tester
+/** avpack: .mp3/MPEG tester
 2021, Simon Zolin
 */
 
@@ -75,7 +75,7 @@ ffvec test_mp3_write()
 
 	for (;;) {
 		r = mp3write_process(&m, &in, &out, flags);
-		// printf("mp3write_process: %d\n", r);
+		// xlog("mp3write_process: %d", r);
 		switch (r) {
 		case MP3WRITE_DATA:
 			ffvec_grow(&v, out.len, 1);
@@ -105,26 +105,25 @@ end:
 // static void mpegr_log(void *udata, ffstr msg)
 // {
 // 	(void)udata;
-// 	printf("%.*s\n", (int)msg.len, msg.ptr);
+// 	xlog("%S", &msg);
 // }
 
-void test_mp3_read(ffstr data)
+void test_mp3_read(ffstr data, int partial)
 {
 	int r;
 	ffstr in = {}, out;
 	mp3read m = {};
 	// m.log = mpegr_log;
 	mp3read_open(&m, data.len);
-	ffuint off = 1;
+	ffuint off = 0;
 	const struct mpeg1read_info *info;
 	int frno = 0;
-	int partial = 0;
 
 	for (int i = data.len*2;;  i--) {
 		x(i >= 0);
 
 		r = mp3read_process(&m, &in, &out);
-		// printf("mpegread_process: %d\n", r);
+		// xlog("mpegread_process: %d", r);
 		switch (r) {
 
 		case MP3READ_APETAG:
@@ -141,9 +140,7 @@ void test_mp3_read(ffstr data)
 					break;
 				}
 			}
-			printf("mp3read_tag: %u = %.*s\n"
-				, (int)t
-				, (int)val.len, val.ptr);
+			xlog("mp3read_tag: (%u) %S = %S", (int)t, &name, &val);
 			x(k == 1);
 			break;
 		}
@@ -157,7 +154,7 @@ void test_mp3_read(ffstr data)
 			break;
 
 		case MPEG1READ_DATA:
-			printf("frame#%d:%u\n", frno++, (int)out.len);
+			xlog("frame#%d:%u", frno++, (int)out.len);
 			break;
 
 		case MPEG1READ_SEEK:
@@ -169,7 +166,7 @@ void test_mp3_read(ffstr data)
 			ffstr_setstr(&in, &data);
 			ffstr_shift(&in, off);
 			if (partial)
-				ffstr_set(&in, data.ptr + off, 1);
+				ffstr_set(&in, data.ptr + off, ffmin(partial, data.len - off));
 			off += in.len;
 			break;
 
@@ -177,7 +174,7 @@ void test_mp3_read(ffstr data)
 			goto end;
 
 		default:
-			printf("error: mpegread_process: %s\n", mp3read_error(&m));
+			xlog("error: mpegread_process: %s", mp3read_error(&m));
 			x(0);
 		}
 	}
@@ -186,21 +183,20 @@ end:
 	mp3read_close(&m);
 }
 
-void test_mpeg_seek(ffstr data, ffuint delta)
+void test_mpeg_seek(ffstr data, ffuint delta, int partial)
 {
 	int r;
-	ffstr in, out;
+	ffstr in = {}, out;
 	mpeg1read m = {};
 	// m.log = mpegr_log;
 	mpeg1read_open(&m, data.len);
 	ffuint seek = 0;
-	ffstr_set(&in, data.ptr, 1);
-	ffuint off = 1;
+	ffuint off = 0;
 	const struct mpeg1read_info *info;
 
 	for (;;) {
 		r = mpeg1read_process(&m, &in, &out);
-		// printf("mpegread_process: %d\n", r);
+		// xlog("mpegread_process: %d", r);
 		switch (r) {
 		case MPEG1READ_HEADER:
 			info = mpeg1read_info(&m);
@@ -212,21 +208,24 @@ void test_mpeg_seek(ffstr data, ffuint delta)
 			if (seek > info->total_samples)
 				goto end;
 			mpeg1read_seek(&m, seek);
-			printf("\nmpegread: seeking to: %u\n", seek);
+			xlog("mpegread: seeking to: %u", seek);
 			break;
 		case MPEG1READ_SEEK:
 			off = mpeg1read_offset(&m);
 			// fallthrough
 		case MPEG1READ_MORE:
-			ffstr_set(&in, data.ptr + off, 1);
-			off++;
+			ffstr_setstr(&in, &data);
+			ffstr_shift(&in, off);
+			if (partial)
+				ffstr_set(&in, data.ptr + off, ffmin(partial, data.len - off));
+			off += in.len;
 			break;
 
 		case MP3READ_DONE:
 			goto end;
 
 		default:
-			printf("error: mpegread_process: %s\n", mpeg1read_error(&m));
+			xlog("error: mpegread_process: %s", mpeg1read_error(&m));
 			x(0);
 		}
 	}
@@ -309,15 +308,20 @@ void test_mp3()
 
 	if (Verbose) {
 		ffstr s = ffmem_print(buf.ptr, buf.len, FFMEM_PRINT_ZEROSPACE);
-		printf("%.*s\n", (int)s.len, s.ptr);
+		xlog("%S", &s);
 		ffstr_free(&s);
 	}
 
 	ffstr data = FFSTR_INITSTR(&buf);
-	test_mp3_read(data);
+	test_mp3_read(data, 0);
+	test_mp3_read(data, 3);
 
 	ffstr_set(&data, mpeg_sample, sizeof(mpeg_sample)-1);
-	test_mp3_read(data);
+#if 0
+	data.ptr = NULL;
+	file_readall("/tmp/1.mpeg", &data);
+#endif
+	test_mp3_read(data, 0);
 
 #if 0
 	data.ptr = NULL;

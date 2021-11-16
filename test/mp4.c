@@ -43,7 +43,7 @@ ffvec test_mp4_write()
 
 	for (;;) {
 		r = mp4write_process(&m, &in, &out);
-		// printf("mp4write_process: %d\n", r);
+		// xlog("mp4write_process: %d", r);
 		switch (r) {
 		case MP4WRITE_DATA:
 			ffvec_grow(&v, out.len, 1);
@@ -61,7 +61,7 @@ ffvec test_mp4_write()
 			mp4write_finish(&m);
 			break;
 		default:
-			printf("err: %s\n", mp4write_error(&m));
+			xlog("err: %s", mp4write_error(&m));
 			x(0);
 		}
 	}
@@ -74,22 +74,23 @@ end:
 static void mp4r_log(void *udata, ffstr msg)
 {
 	(void)udata;
-	printf("%.*s\n", (int)msg.len, msg.ptr);
+	xlog("%S", &msg);
 }
 
-void test_mp4_read(ffstr data)
+void test_mp4_read(ffstr data, int partial)
 {
 	int r;
-	ffstr in, out;
+	ffstr in = {}, out;
 	mp4read m = {};
 	m.log = mp4r_log;
 	mp4read_open(&m);
-	ffstr_set(&in, data.ptr, 1);
-	ffuint off = 1;
+	ffuint off = 0;
 
-	for (;;) {
+	for (int i = data.len*2;;  i--) {
+		x(i >= 0);
+
 		r = mp4read_process(&m, &in, &out);
-		// printf("mp4read_process: %d\n", r);
+		// xlog("mp4read_process: %d", r);
 		switch (r) {
 		case MP4READ_HEADER: {
 			const struct mp4read_audio_info *ti = mp4read_track_info(&m, 0);
@@ -122,8 +123,11 @@ void test_mp4_read(ffstr data)
 			off = mp4read_offset(&m);
 			// fallthrough
 		case MP4READ_MORE:
-			ffstr_set(&in, data.ptr + off, 1);
-			off++;
+			ffstr_setstr(&in, &data);
+			ffstr_shift(&in, off);
+			if (partial)
+				ffstr_set(&in, data.ptr + off, ffmin(partial, data.len - off));
+			off += in.len;
 			break;
 
 		default:
@@ -135,7 +139,7 @@ next:
 	mp4read_track_activate(&m, 0);
 	for (;;) {
 		r = mp4read_process(&m, &in, &out);
-		// printf("mp4read_process: %d\n", r);
+		// xlog("mp4read_process: %d", r);
 		switch (r) {
 		case MP4READ_DATA:
 			x(0 == mp4read_cursample(&m));
@@ -149,8 +153,11 @@ next:
 			off = mp4read_offset(&m);
 			// fallthrough
 		case MP4READ_MORE:
-			ffstr_set(&in, data.ptr + off, 1);
-			off++;
+			ffstr_setstr(&in, &data);
+			ffstr_shift(&in, off);
+			if (partial)
+				ffstr_set(&in, data.ptr + off, ffmin(partial, data.len - off));
+			off += in.len;
 			break;
 
 		default:
@@ -171,7 +178,8 @@ void test_mp4()
 	buf = test_mp4_write();
 
 	ffstr data = FFSTR_INITSTR(&buf);
-	test_mp4_read(data);
+	test_mp4_read(data, 0);
+	test_mp4_read(data, 3);
 
 	ffvec_free(&buf);
 }

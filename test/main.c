@@ -2,8 +2,9 @@
 2021, Simon Zolin */
 
 #include <ffbase/stringz.h>
+#include <ffbase/vector.h>
 #include <test/test.h>
-#include <stdio.h>
+#include <avpack/shared.h>
 
 extern void test_aac();
 extern void test_avi();
@@ -18,6 +19,51 @@ extern void test_ogg();
 extern void test_vorbistag();
 extern void test_wav();
 
+void gather(ffstr d, ffuint partial)
+{
+	ffstr in = {}, out = {};
+	int r, pos, n, first = 1;
+	ffvec buf = {};
+	for (;;) {
+		n = ffmin(partial, d.len);
+		if (first) {
+			first = 0;
+			n = 1;
+		}
+		x(n != 0);
+		ffstr_set(&in, d.ptr, n);
+		ffstr_shift(&d, n);
+
+		for (;;) {
+			r = _avpack_gather_header(&buf, in, 4, &out);
+			ffstr_shift(&in, r);
+			xlog("1 d='%S' buf='%S' out='%S'", &d, &buf, &out);
+			if (out.len == 0)
+				break;
+
+			pos = ffstr_findz(&out, "1234");
+			if (pos >= 0) {
+				goto done;
+			}
+			r = _avpack_gather_trailer(&buf, in, 4, r);
+			in.ptr += r,  in.len -= r;
+			xlog("2 d='%S' buf='%S'", &d, &buf);
+		}
+	}
+
+done:
+	ffvec_free(&buf);
+}
+
+void test_gather()
+{
+	ffstr d = FFSTR_INITZ("abcdef1234wxyz");
+	for (ffuint i = 1;  i <= d.len;  i++) {
+		gather(d, i);
+		xlog("");
+	}
+}
+
 struct test {
 	const char *name;
 	void (*func)();
@@ -29,6 +75,7 @@ static const struct test atests[] = {
 	T(caf),
 	T(cue),
 	T(flac),
+	T(gather),
 	T(mkv),
 	T(mp3),
 	T(mp4),
@@ -46,13 +93,14 @@ int main(int argc, const char **argv)
 	const struct test *t;
 
 	if (argc == 1) {
-		printf("Usage: avpack-test [-v] TEST...\n");
-		printf("Supported tests: all ");
+		ffvec v = {};
+		ffvec_addsz(&v, "Usage: avpack-test [-v] TEST...\n");
+		ffvec_addsz(&v, "Supported tests: all ");
 		FF_FOREACH(atests, t) {
-			printf("%s ", t->name);
+			ffvec_addfmt(&v, "%s ", t->name);
 		}
-		printf("\n");
-		printf("Options: -v  Verbose\n");
+		ffvec_addsz(&v, "\nOptions:\n-v  Verbose");
+		xlog("%S", &v);
 		return 0;
 	}
 
@@ -65,9 +113,9 @@ int main(int argc, const char **argv)
 	if (ffsz_eq(argv[ia], "all")) {
 		//run all tests
 		FF_FOREACH(atests, t) {
-			printf("%s\n", t->name);
+			xlog("%s", t->name);
 			t->func();
-			printf("  OK\n");
+			xlog("  OK");
 		}
 		return 0;
 	}
@@ -85,14 +133,14 @@ int main(int argc, const char **argv)
 		}
 
 		if (sel == NULL) {
-			printf("unknown test: %s\n", argv[n]);
+			xlog("unknown test: %s", argv[n]);
 			return 1;
 		}
 
 call:
-		printf("%s\n", sel->name);
+		xlog("%s", sel->name);
 		sel->func();
-		printf("  OK\n");
+		xlog("  OK");
 	}
 
 	return 0;

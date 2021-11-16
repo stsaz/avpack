@@ -225,47 +225,42 @@ static int _mpcr_ei_read(mpcread *m, ffstr body)
 }
 
 /** Find AP block */
-static int _mpcr_ap_find(mpcread *m, ffstr *input)
+static int _mpcr_ap_find(mpcread *m, ffstr *input, ffstr *output)
 {
-	int r;
+	int r, pos;
 	ffstr chunk = {};
 
 	for (;;) {
 
-		r = _avpack_gather_header((ffstr*)&m->buf, *input, 2, &chunk);
-		int hdr_shifted = r;
+		r = _avpack_gather_header(&m->buf, *input, 2, &chunk);
 		ffstr_shift(input, r);
 		m->off += r;
 		if (chunk.len == 0) {
-			ffstr_null(&m->chunk);
+			ffstr_null(output);
 			return 0xfeed;
 		}
 
-		r = ffstr_find(&chunk, "AP", 2);
-		// if (r != 0)
-		// 	m->unrecognized_data = 1;
-		if (r >= 0) {
-			if (chunk.ptr != m->buf.ptr) {
-				ffstr_shift(input, r);
-				m->off += r;
-			}
-			ffstr_shift(&chunk, r);
+		pos = ffstr_find(&chunk, "AP", 2);
+		if (pos >= 0)
 			break;
-		}
 
-		r = _avpack_gather_trailer((ffstr*)&m->buf, *input, 2, hdr_shifted);
+		r = _avpack_gather_trailer(&m->buf, *input, 2, r);
 		// r<0: ffstr_shift() isn't suitable due to assert()
 		input->ptr += r,  input->len -= r;
 		m->off += r;
 	}
 
-	ffstr_set(&m->chunk, chunk.ptr, 2);
+	if (chunk.ptr == input->ptr) {
+		ffstr_shift(input, 2 + pos);
+		m->off += 2 + pos;
+	}
+	ffstr_set(output, &chunk.ptr[pos], 2);
 	if (m->buf.len != 0) {
-		ffstr_erase_left((ffstr*)&m->buf, r);
-		ffstr_set(&m->chunk, m->buf.ptr, 2);
+		ffstr_erase_left((ffstr*)&m->buf, pos);
+		ffstr_set(output, m->buf.ptr, 2);
 	}
 
-	return 0xdeed;
+	return 0;
 }
 
 static inline void _mpcr_log(mpcread *m, const char *fmt, ...)
@@ -524,7 +519,7 @@ static inline int mpcread_process(mpcread *m, ffstr *input, ffstr *output)
 			return MPCREAD_DATA;
 
 		case R_AP_FIND:
-			r = _mpcr_ap_find(m, input);
+			r = _mpcr_ap_find(m, input, &m->chunk);
 			if (r == 0xfeed)
 				return MPCREAD_MORE;
 

@@ -34,7 +34,7 @@ static const ffbyte apetag[] = {
 static void mpcr_log(void *udata, ffstr msg)
 {
 	(void)udata;
-	printf("%.*s\n", (int)msg.len, msg.ptr);
+	xlog("%S", &msg);
 }
 
 void test_mpc_read(ffstr data, int partial)
@@ -47,10 +47,11 @@ void test_mpc_read(ffstr data, int partial)
 	ffuint off = 0;
 	int frno = 0;
 
-	for (ffuint i = 0;  i != data.len * 2;  i++) {
+	for (int i = data.len*2;;  i--) {
+		x(i >= 0);
 
 		r = mpcread_process(&c, &in, &out);
-		// printf("mpcread_process: %d\n", r);
+		// xlog("mpcread_process: %d", r);
 
 		switch (r) {
 		case MPCREAD_HEADER: {
@@ -71,9 +72,7 @@ void test_mpc_read(ffstr data, int partial)
 			};
 			ffstr name, val;
 			/*int t =*/ mpcread_tag(&c, &name, &val);
-			printf("mpcread_tag: %.*s = %.*s\n"
-				, (int)name.len, name.ptr
-				, (int)val.len, val.ptr);
+			xlog("mpcread_tag: %S = %S", &name, &val);
 			int k = 0;
 			const struct tag *tag;
 			FFARRAY_FOREACH(tags, tag) {
@@ -94,20 +93,19 @@ void test_mpc_read(ffstr data, int partial)
 			x(off < data.len);
 			ffstr_set(&in, data.ptr + off, data.len - off);
 			if (partial != 0)
-				ffstr_set(&in, data.ptr + off, partial);
+				ffstr_set(&in, data.ptr + off, ffmin(partial, data.len - off));
 			off += in.len;
 			break;
 
 		case MPCREAD_DATA:
-			printf("frame#%u:%u\n"
-				, frno++, (int)out.len);
+			xlog("frame#%u:%u", frno++, (int)out.len);
 			break;
 
 		case MPCREAD_DONE:
 			goto end;
 
 		default:
-			printf("mpcread_process: %s\n", mpcread_error(&c));
+			xlog("mpcread_process: %s", mpcread_error(&c));
 			x(0);
 		}
 	}
@@ -132,7 +130,7 @@ void test_mpc()
 	ffstr_growadd(&data, &cap, apetag, sizeof(apetag)-1);
 
 	test_mpc_read(data, 0);
-	test_mpc_read(data, 1);
+	test_mpc_read(data, 3);
 
 	ffstr_free(&data);
 }

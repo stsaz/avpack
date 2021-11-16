@@ -33,23 +33,25 @@ const ffbyte caf_sample[] = {
 static void cafr_log(void *udata, ffstr msg)
 {
 	(void)udata;
-	printf("%.*s\n", (int)msg.len, msg.ptr);
+	xlog("%S", &msg);
 }
 
-void test_caf_read(ffstr data)
+void test_caf_read(ffstr data, int partial)
 {
 	int r;
-	ffstr in, out;
+	ffstr in = {}, out;
 	cafread c = {};
 	c.log = cafr_log;
 	cafread_open(&c);
-	ffstr_set(&in, data.ptr, 1);
-	ffuint off = 1;
+	ffuint off = 0;
 	ffuint itag = 0;
+	ffuint frno = 0;
 
-	for (;;) {
+	for (int i = data.len*2;;  i--) {
+		x(i >= 0);
+
 		r = cafread_process(&c, &in, &out);
-		// printf("cafread_process: %d\n", r);
+		// xlog("cafread_process: %d", r);
 		switch (r) {
 		case CAFREAD_HEADER: {
 			const struct caf_info *ai = cafread_info(&c);
@@ -63,9 +65,7 @@ void test_caf_read(ffstr data)
 		case CAFREAD_TAG: {
 			ffstr val;
 			ffstr name = cafread_tag(&c, &val);
-			printf("cafread_tag: %.*s = %.*s\n"
-				, (int)name.len, name.ptr
-				, (int)val.len, val.ptr);
+			xlog("cafread_tag: %S = %S", &name , &val);
 			switch (itag++) {
 			case 0:
 				xseq(&name, "ARTIST");
@@ -83,24 +83,30 @@ void test_caf_read(ffstr data)
 			off = cafread_offset(&c);
 			// fallthrough
 		case CAFREAD_MORE:
-			ffstr_set(&in, data.ptr + off, 1);
-			off++;
+			ffstr_setstr(&in, &data);
+			ffstr_shift(&in, off);
+			if (partial)
+				ffstr_set(&in, data.ptr + off, ffmin(partial, data.len - off));
+			off += in.len;
 			break;
 
 		default:
-			printf("cafread_process: %s\n", cafread_error(&c));
+			xlog("cafread_process: %s", cafread_error(&c));
 			x(0);
 		}
 	}
 
 next:
-	for (;;) {
+	for (int i = data.len*2;;  i--) {
+		x(i >= 0);
+
 		r = cafread_process(&c, &in, &out);
-		// printf("cafread_process: %d\n", r);
+		// xlog("cafread_process: %d", r);
 		switch (r) {
 		case CAFREAD_DATA:
 			// xseq(&out, "aacframe1");
-			// printf("curpos=%u\n", (int)cafread_curpos(&c));
+			// xlog("curpos=%u", (int)cafread_curpos(&c));
+			frno++;
 			break;
 		case CAFREAD_DONE:
 			goto end;
@@ -108,10 +114,16 @@ next:
 		case CAFREAD_SEEK:
 			off = cafread_offset(&c);
 			// fallthrough
-		case CAFREAD_MORE:
 		case CAFREAD_MORE_OR_DONE:
-			ffstr_set(&in, data.ptr + off, 1);
-			off++;
+			if (off == data.len)
+				goto end;
+			// fallthrough
+		case CAFREAD_MORE:
+			ffstr_setstr(&in, &data);
+			ffstr_shift(&in, off);
+			if (partial)
+				ffstr_set(&in, data.ptr + off, ffmin(partial, data.len - off));
+			off += in.len;
 			break;
 
 		default:
@@ -122,6 +134,7 @@ next:
 	//cafread_seek
 
 end:
+	x(frno != 0);
 	cafread_close(&c);
 }
 
@@ -134,5 +147,6 @@ void test_caf()
 	x(0 == file_readall("/tmp/1.caf", &data));
 #endif
 
-	test_caf_read(data);
+	test_caf_read(data, 0);
+	test_caf_read(data, 3);
 }

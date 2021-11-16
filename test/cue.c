@@ -9,6 +9,7 @@ const char cue_sample[] = { "\
 REM NAME \"VAL\"\r\n\
 PERFORMER \"VAL\"\r\n\
 TITLE \"VAL\"\r\n\
+\r\n\
 FILE \"VAL\" WAVE\r\n\
   TRACK 01 AUDIO\r\n\
     PERFORMER \"VAL\"\r\n\
@@ -31,9 +32,12 @@ void cue_read(ffstr data, int partial)
 	cueread_open(&c);
 	ffuint off = 0;
 
-	for (ffuint i = 0;  i != data.len * 2;  i++) {
+	for (int i = data.len*2;;  i--) {
+		x(i >= 0);
 
 		r = cueread_process(&c, &in, &out);
+		if (r != CUEREAD_MORE)
+			xlog("r:%d out:'%S'", r, &out);
 
 		switch (r) {
 		case CUEREAD_REM_NAME:
@@ -52,19 +56,27 @@ void cue_read(ffstr data, int partial)
 			xseq(&out, "WAVE");
 			break;
 
-		case CUEREAD_TRK_NUM:
+		case CUEREAD_TRK_NUM: {
+			static ffbyte vals[] = { 1,2,3 };
+			static int ival;
+			xieq(vals[ival++], cueread_tracknumber(&c));
 			break;
+		}
 
 		case CUEREAD_TRK_INDEX00:
-		case CUEREAD_TRK_INDEX:
+		case CUEREAD_TRK_INDEX: {
+			static ffbyte vals[] = { 0,1,2,3,4 };
+			static int ival;
+			xieq(vals[ival++], cueread_cdframes(&c));
 			break;
+		}
 
 		case CUEREAD_MORE:
 			if (off == data.len)
 				goto end;
 			ffstr_set(&in, data.ptr + off, data.len - off);
 			if (partial != 0)
-				ffstr_set(&in, data.ptr + off, partial);
+				ffstr_set(&in, data.ptr + off, ffmin(partial, data.len - off));
 			off += in.len;
 			break;
 
@@ -73,7 +85,7 @@ void cue_read(ffstr data, int partial)
 			break;
 
 		default:
-			printf("cueread_process: %s  line %u\n", cueread_error(&c), cueread_line(&c));
+			xlog("cueread_process: %s  line %u", cueread_error(&c), cueread_line(&c));
 			x(0);
 		}
 	}
@@ -87,5 +99,5 @@ void test_cue()
 	ffstr data = {};
 	ffstr_set(&data, cue_sample, sizeof(cue_sample)-1);
 	cue_read(data, 0);
-	cue_read(data, 1);
+	cue_read(data, 3);
 }
