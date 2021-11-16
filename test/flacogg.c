@@ -1,0 +1,134 @@
+/** avpack: .ogg(FLAC) tester
+2021, Simon Zolin
+*/
+
+#include <avpack/flac-ogg-read.h>
+#include <avpack/ogg-read.h>
+#include <test/test.h>
+
+const char ogg_flac_sample[] = {
+	"\x4f\x67\x67\x53\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00\x28\x0b"
+	"\x2e\x05\x00\x00\x00\x00\x8e\x39\xd5\x02\x01\x33\x7f\x46\x4c\x41"
+	"\x43\x01\x00\x00\x01\x66\x4c\x61\x43\x00\x00\x00\x22\x12\x00\x12"
+	"\x00\x00\x00\x00\x00\x4a\x58\x0a\xc4\x42\xf0\x00\x00\x00\x00\x00"
+	"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x4f"
+	"\x67\x67\x53\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x28\x0b\x2e"
+	"\x05\x01\x00\x00\x00\x0a\x22\x9f\x68\x01\x57\x84\x00\x00\x53\x0d"
+	"\x00\x00\x00\x4c\x61\x76\x66\x35\x38\x2e\x34\x35\x2e\x31\x30\x30"
+	"\x03\x00\x00\x00\x1a\x00\x00\x00\x65\x6e\x63\x6f\x64\x65\x72\x3d"
+	"\x4c\x61\x76\x63\x35\x38\x2e\x39\x31\x2e\x31\x30\x30\x20\x66\x6c"
+	"\x61\x63\x0b\x00\x00\x00\x74\x69\x74\x6c\x65\x3d\x54\x69\x74\x6c"
+	"\x65\x0d\x00\x00\x00\x61\x72\x74\x69\x73\x74\x3d\x41\x72\x74\x69"
+	"\x73\x74\x4f\x67\x67\x53\x00\x04\x44\xac\x00\x00\x00\x00\x00\x00"
+	"\x28\x0b\x2e\x05\x02\x00\x00\x00\xfe\x12\x50\x55\x0a\x0e\x0e\x0e"
+	"\x0e\x0e\x0e\x0e\x0e\x0e\x10\xff\xf8\x59\x18\x00\x6b\x00\x00\x00"
+	"\x00\x00\x00\x10\x8a\xff\xf8\x59\x18\x01\x6c\x00\x00\x00\x00\x00"
+	"\x00\x87\xff\xff\xf8\x59\x18\x02\x65\x00\x00\x00\x00\x00\x00\xbe"
+	"\x65\xff\xf8\x59\x18\x03\x62\x00\x00\x00\x00\x00\x00\x29\x10\xff"
+	"\xf8\x59\x18\x04\x77\x00\x00\x00\x00\x00\x00\xcd\x51\xff\xf8\x59"
+	"\x18\x05\x70\x00\x00\x00\x00\x00\x00\x5a\x24\xff\xf8\x59\x18\x06"
+	"\x79\x00\x00\x00\x00\x00\x00\x63\xbe\xff\xf8\x59\x18\x07\x7e\x00"
+	"\x00\x00\x00\x00\x00\xf4\xcb\xff\xf8\x59\x18\x08\x53\x00\x00\x00"
+	"\x00\x00\x00\x2b\x39\xff\xf8\x79\x18\x09\x0a\x43\x70\x00\x00\x00"
+	"\x00\x00\x00\x98\x85"
+};
+
+void test_flacogg_read(ffstr data, int partial)
+{
+	int r;
+	ffstr in = {}, out;
+	oggread o = {};
+	oggread_open(&o, 0);
+
+	ffstr in_flac = {}, out_flac;
+	flacoggread fo = {};
+	flacoggread_open(&fo);
+	ffuint off = 0;
+	int frno = 0;
+
+	for (int i = data.len*2;;  i--) {
+		x(i >= 0);
+
+		r = oggread_process(&o, &in, &out);
+		switch (r) {
+		case OGGREAD_MORE:
+			if (off == data.len)
+				goto end;
+			ffstr_setstr(&in, &data);
+			ffstr_shift(&in, off);
+			if (partial)
+				ffstr_set(&in, data.ptr + off, ffmin(partial, data.len - off));
+			off += in.len;
+			continue;
+
+		case OGGREAD_HEADER:
+		case OGGREAD_DATA:
+			// xlog("pkt#%d:%u", );
+			in_flac = out;
+			break;
+
+		case OGGREAD_DONE:
+			goto end;
+
+		default:
+			x(0);
+		}
+
+		int brk = 0;
+		while (!brk) {
+			r = flacoggread_process(&fo, &in_flac, &out_flac);
+			// xlog("flacoggread_process: %d", r);
+			switch (r) {
+
+			case FLACOGGREAD_HEADER: {
+				const struct flac_info *info = flacoggread_info(&fo);
+				xieq(16, info->bits);
+				xieq(44100, info->sample_rate);
+				xieq(2, info->channels);
+				break;
+			}
+
+			case FLACOGGREAD_TAG: {
+				ffstr name, val;
+				ffuint t = flacoggread_tag(&fo, &name, &val);
+				xlog("flacread_tag: (%u) %S = %S", (int)t, &name , &val);
+				break;
+			}
+
+			case FLACOGGREAD_DATA:
+				frno++;
+				xlog("frame#%d:%u", frno, (int)out_flac.len);
+				break;
+
+			case FLACOGGREAD_HEADER_FIN:
+				break;
+
+			case FLACOGGREAD_MORE:
+				brk = 1;
+				break;
+
+			default:
+				xlog("error: flacoggread_process: %s", flacoggread_error(&fo));
+				x(0);
+			}
+		}
+	}
+
+end:
+	x(frno != 0);
+	flacoggread_close(&fo);
+	oggread_close(&o);
+}
+
+void test_flacogg()
+{
+	ffstr data = FFSTR_INITN(ogg_flac_sample, sizeof(ogg_flac_sample)-1);
+
+#if 0
+	data.ptr = NULL;
+	file_readall("/tmp/1.ogg", &data);
+#endif
+
+	test_flacogg_read(data, 0);
+	test_flacogg_read(data, 3);
+}

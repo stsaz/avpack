@@ -9,11 +9,13 @@ extern void test_aac();
 extern void test_avi();
 extern void test_caf();
 extern void test_cue();
+extern void test_flac();
 extern void test_mkv();
 extern void test_mp3();
 extern void test_mp4();
 extern void test_mpc();
 extern void test_ogg();
+extern void test_vorbistag();
 extern void test_wav();
 
 struct test {
@@ -26,11 +28,13 @@ static const struct test atests[] = {
 	T(avi),
 	T(caf),
 	T(cue),
+	T(flac),
 	T(mkv),
 	T(mp3),
 	T(mp4),
 	T(mpc),
 	T(ogg),
+	T(vorbistag),
 	T(wav),
 };
 #undef T
