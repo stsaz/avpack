@@ -553,7 +553,7 @@ static ffuint64 _mkvr_seek_offset(const struct _mkvread_seekpoint *pt, ffuint64 
 static int _mkvr_seek_sync(mkvread *m, ffstr *input, ffstr *output)
 {
 	int r, pos;
-	ffstr chunk;
+	ffstr chunk = {};
 	for (;;) {
 
 		r = _avpack_gather_header(&m->buf, *input, 4, &chunk);

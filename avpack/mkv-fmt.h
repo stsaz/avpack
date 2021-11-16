@@ -176,7 +176,7 @@ varint size_delta[]
 static int mkv_lacing_ebml(ffstr *data, ffuint *lace, ffuint n)
 {
 	int r;
-	ffint64 val, prev;
+	ffint64 val, prev = 0;
 
 	if (0 > (r = mkv_varint_shift(data, (ffuint64*)&prev))
 		|| prev > (ffuint)-1)

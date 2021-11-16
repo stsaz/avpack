@@ -106,10 +106,10 @@ static inline int id3v1write_set(struct id3v1 *t, ffuint id, ffstr data)
 	return n;
 }
 
-struct id3v1read {
+typedef struct id3v1read {
 	ffuint state;
 	char trkno[4];
-};
+} id3v1read;
 
 enum ID3V1READ_R {
 	ID3V1READ_NO,
@@ -124,8 +124,8 @@ static inline int id3v1read_process(struct id3v1read *rd, ffstr data, ffstr *val
 {
 	enum { I_TITLE, I_ARTIST, I_ALBUM, I_YEAR, I_COMMENT, I_TRKNO, I_GENRE, I_DONE };
 	struct id3v1 *t = (struct id3v1*)data.ptr;
-	ffstr s;
-	int r;
+	ffstr s = {};
+	int r = 0;
 
 	switch (rd->state) {
 

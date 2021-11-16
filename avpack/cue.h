@@ -39,6 +39,11 @@ typedef struct cueread {
 #define _CUER_WARN(c, e) \
 	(c)->error = (e),  CUEREAD_WARN
 
+static inline const char* cueread_error(cueread *c)
+{
+	return c->error;
+}
+
 static inline void cueread_open(cueread *c)
 {
 	c->track_num = (ffuint)-1;
@@ -85,13 +90,16 @@ static inline int cueread_process(cueread *c, ffstr *input, ffstr *output)
 	case R_GATHER_LINE: {
 		ffssize pos = ffstr_findchar(input, '\n');
 		if (pos < 0) {
-			ffvec_add2(&c->buf, input, 1);
+			if (input->len != ffvec_add(&c->buf, input->ptr, input->len, 1))
+				return _CUER_WARN(c, "not enough memory");
 			ffstr_shift(input, input->len);
 			return CUEREAD_MORE;
 		}
+
 		ffstr_set(&c->line, input->ptr, pos);
 		if (c->buf.len != 0) {
-			ffvec_add(&c->buf, input->ptr, pos, 1);
+			if ((ffsize)pos != ffvec_add(&c->buf, input->ptr, pos, 1))
+				return _CUER_WARN(c, "not enough memory");
 			ffstr_setstr(&c->line, &c->buf);
 			c->buf.len = 0;
 		}
@@ -199,10 +207,5 @@ static inline int cueread_process(cueread *c, ffstr *input, ffstr *output)
 #define cueread_tracknumber(c)  (c)->track_num
 
 #define cueread_line(c)  (c)->line_num
-
-static inline const char* cueread_error(cueread *c)
-{
-	return c->error;
-}
 
 #undef _CUER_WARN

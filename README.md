@@ -23,17 +23,25 @@ Contents:
 	* .aac read: `avpack/aac-read.h`
 	* .avi read: `avpack/avi-read.h`
 	* .caf read: `avpack/caf-read.h`
+	* .flac read: `avpack/flac-read.h`
 	* .mkv read: `avpack/mkv-read.h`
 	* .mp3 read/write: `avpack/mp3-read.h`, `avpack/mp3-write.h`
 	* .mp4/.m4a/.mov read/write: `avpack/mp4-read.h`, `avpack/mp4-write.h`
 	* .mpc read: `avpack/mpc-read.h`
+	* .ogg(FLAC) read: `avpack/flac-ogg-read.h`
 	* .ogg/.opus read/write: `avpack/ogg-read.h`, `avpack/ogg-write.h`
 	* .wav read/write: `avpack/wav-read.h`, `avpack/wav-write.h`
+* Audio streams:
+	* ICY stream read: `avpack/icy.h`
 	* MPEG-1 stream read: `avpack/mpeg1-read.h`
+* Playlists:
+	* .cue read: `avpack/cue.h`
+	* .m3u read/write: `avpack/m3u.h`
+	* .pls read: `avpack/pls.h`
 * Tags:
 	* APETAG read: `avpack/apetag.h`
 	* ID3v1 & ID3v2 read/write: `avpack/id3v1.h`, `avpack/id3v2.h`
-* .cue read: `avpack/cue.h`
+	* Vorbis tags read/write: `avpack/vorbistag.h`
 
 It doesn't contain code that reads or writes files - this is user's responsibility.
 

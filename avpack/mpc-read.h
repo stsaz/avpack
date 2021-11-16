@@ -1,4 +1,5 @@
 /** avpack: musepack (.mpc) reader
+* incomplete seeking algorithm
 2017,2021, Simon Zolin
 */
 

@@ -7,17 +7,52 @@
 #include <avpack/shared.h>
 
 extern void test_aac();
+extern void test_apetag();
 extern void test_avi();
 extern void test_caf();
 extern void test_cue();
 extern void test_flac();
+extern void test_flacogg();
+extern void test_icy();
+extern void test_m3u();
 extern void test_mkv();
 extern void test_mp3();
 extern void test_mp4();
 extern void test_mpc();
 extern void test_ogg();
+extern void test_pls();
 extern void test_vorbistag();
 extern void test_wav();
+void test_gather();
+
+struct test {
+	const char *name;
+	void (*func)();
+};
+#define T(nm) { #nm, &test_ ## nm }
+static const struct test atests[] = {
+	T(aac),
+	T(apetag),
+	T(avi),
+	T(caf),
+	T(cue),
+	T(flac),
+	T(flacogg),
+	T(icy),
+	T(m3u),
+	T(gather),
+	T(mkv),
+	T(mp3),
+	T(mp4),
+	T(mpc),
+	T(ogg),
+	T(pls),
+	T(vorbistag),
+	T(wav),
+};
+#undef T
+
+int Verbose;
 
 void gather(ffstr d, ffuint partial)
 {
@@ -64,30 +99,6 @@ void test_gather()
 	}
 }
 
-struct test {
-	const char *name;
-	void (*func)();
-};
-#define T(nm) { #nm, &test_ ## nm }
-static const struct test atests[] = {
-	T(aac),
-	T(avi),
-	T(caf),
-	T(cue),
-	T(flac),
-	T(gather),
-	T(mkv),
-	T(mp3),
-	T(mp4),
-	T(mpc),
-	T(ogg),
-	T(vorbistag),
-	T(wav),
-};
-#undef T
-
-int Verbose;
-
 int main(int argc, const char **argv)
 {
 	const struct test *t;
@@ -101,6 +112,7 @@ int main(int argc, const char **argv)
 		}
 		ffvec_addsz(&v, "\nOptions:\n-v  Verbose");
 		xlog("%S", &v);
+		ffvec_free(&v);
 		return 0;
 	}
 
