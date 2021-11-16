@@ -396,6 +396,7 @@ static inline int aviread_process(aviread *a, ffstr *input, ffstr *output)
 				break;
 			}
 
+			chunk = &a->chunks[a->ictx];
 			if (chunk->ctx != NULL) {
 				a->state = R_NEXTCHUNK;
 				continue;

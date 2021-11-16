@@ -31,6 +31,7 @@ void cue_read(ffstr data, int partial)
 	cueread c = {};
 	cueread_open(&c);
 	ffuint off = 0;
+	int trk_ival = 0, trk_idx_ival = 0;
 
 	for (int i = data.len*2;;  i--) {
 		x(i >= 0);
@@ -58,16 +59,14 @@ void cue_read(ffstr data, int partial)
 
 		case CUEREAD_TRK_NUM: {
 			static ffbyte vals[] = { 1,2,3 };
-			static int ival;
-			xieq(vals[ival++], cueread_tracknumber(&c));
+			xieq(vals[trk_ival++], cueread_tracknumber(&c));
 			break;
 		}
 
 		case CUEREAD_TRK_INDEX00:
 		case CUEREAD_TRK_INDEX: {
 			static ffbyte vals[] = { 0,1,2,3,4 };
-			static int ival;
-			xieq(vals[ival++], cueread_cdframes(&c));
+			xieq(vals[trk_idx_ival++], cueread_cdframes(&c));
 			break;
 		}
 

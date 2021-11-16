@@ -79,6 +79,7 @@ static inline int cueread_process(cueread *c, ffstr *input, ffstr *output)
 	};
 	int r;
 
+	for (;;) {
 	switch (c->state) {
 
 	case R_GATHER_LINE: {
@@ -97,6 +98,8 @@ static inline int cueread_process(cueread *c, ffstr *input, ffstr *output)
 		ffstr_shift(input, pos+1);
 		ffstr_trimwhite(&c->line);
 		c->line_num++;
+		if (c->line.len == 0)
+			continue;
 		c->state = R_KEY;
 	}
 		// fallthrough
@@ -145,6 +148,7 @@ static inline int cueread_process(cueread *c, ffstr *input, ffstr *output)
 			ffuint idx, min, sec, frames;
 			if (0 != ffstr_matchfmt(&c->line, "%2u %u:%2u:%2u", &idx, &min, &sec, &frames))
 				return _CUER_WARN(c, "bad index value");
+			ffstr_set(output, &c->line.ptr[3], c->line.len - 3);
 			c->cdframes = (ffuint64)(min*60 + sec) * 75 + frames;
 			return (idx == 0) ? CUEREAD_TRK_INDEX00 : CUEREAD_TRK_INDEX;
 		}
@@ -183,8 +187,11 @@ static inline int cueread_process(cueread *c, ffstr *input, ffstr *output)
 		c->state = R_GATHER_LINE;
 		return r;
 	}
+
+	default:
+		return -1;
 	}
-	return -1;
+	}
 }
 
 #define cueread_cdframes(c)  (c)->cdframes

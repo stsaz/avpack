@@ -253,6 +253,7 @@ static int _id3v2read_frame_read(struct id3v2read *d, ffuint *framesize)
 static int _id3v2read_text_decode(struct id3v2read *d, ffstr in, ffstr *out)
 {
 	int r;
+	ffsize n;
 	ffvec *b = &d->unsync_buf;
 	switch (d->txtenc) {
 	case ID3V2_UTF8:
@@ -260,7 +261,9 @@ static int _id3v2read_text_decode(struct id3v2read *d, ffstr in, ffstr *out)
 		break;
 
 	case ID3V2_ANSI:
-		ffvec_grow(b, in.len, 1);
+		n = ffutf8_from_cp(NULL, 0, in.ptr, in.len, d->codepage);
+		if (NULL == ffvec_realloc(b, n, 1))
+			return _ID3V2READ_ERR(d, "not enough memory");
 		b->len = ffutf8_from_cp(b->ptr, b->cap, in.ptr, in.len, d->codepage);
 		ffstr_setstr(out, b);
 		break;
@@ -271,14 +274,19 @@ static int _id3v2read_text_decode(struct id3v2read *d, ffstr in, ffstr *out)
 		if (!(r == FFUNICODE_UTF16LE || r == FFUNICODE_UTF16BE))
 			return _ID3V2READ_ERR(d, "invalid BOM");
 		ffstr_shift(&in, len);
-		ffvec_grow(b, in.len * 2, 1);
+
+		n = ffutf8_from_utf16(NULL, 0, in.ptr, in.len, r);
+		if (NULL == ffvec_realloc(b, n, 1))
+			return _ID3V2READ_ERR(d, "not enough memory");
 		b->len = ffutf8_from_utf16(b->ptr, b->cap, in.ptr, in.len, r);
 		ffstr_setstr(out, b);
 		break;
 	}
 
 	case ID3V2_UTF16BE:
-		ffvec_grow(b, in.len * 2, 1);
+		n = ffutf8_from_utf16(NULL, 0, in.ptr, in.len, FFUNICODE_UTF16BE);
+		if (NULL == ffvec_realloc(b, n, 1))
+			return _ID3V2READ_ERR(d, "not enough memory");
 		b->len = ffutf8_from_utf16(b->ptr, b->cap, in.ptr, in.len, FFUNICODE_UTF16BE);
 		ffstr_setstr(out, b);
 		break;
@@ -316,7 +324,7 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 			if (r < 0)
 				return _ID3V2READ_ERR(d, "not enough memory");
 			ffstr_shift(input, r);
-			if (d->chunk.len == 0)
+			if (d->chunk.len == 0 && d->gather_size != 0)
 				return ID3V2READ_MORE;
 			d->buf.len = 0;
 			d->state = d->nextstate;

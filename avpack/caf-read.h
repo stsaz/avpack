@@ -59,7 +59,11 @@ enum CAFREAD_R {
 };
 
 #define cafread_offset(c)  (c)->inoff
-#define cafread_cursample(c)  (c)->iframe
+
+static inline ffuint64 cafread_cursample(cafread *c)
+{
+	return c->iframe - c->info.packet_frames;
+}
 
 static inline const caf_info* cafread_info(cafread *c)
 {
@@ -253,6 +257,7 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 
 		case R_CHUNK + CAF_T_DATA:
 			_cafr_gather(c, R_DATA_NEXT, 4); // skip "edit count" field
+			c->chunk_size -= 4;
 			return CAFREAD_HEADER;
 
 		case R_DATA_NEXT: {
