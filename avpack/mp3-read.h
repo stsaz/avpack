@@ -153,12 +153,13 @@ static inline int mp3read_process(mp3read *m, ffstr *input, ffstr *output)
 		}
 			// fallthrough
 
-		case R_APETAG_FTR:
+		case R_APETAG_FTR: {
 			apetagread_open(&m->apetag);
-			r = apetagread_footer(&m->apetag, m->chunk);
+			ffint64 seek;
+			r = apetagread_footer(&m->apetag, m->chunk, &seek);
 			switch (r) {
 			case APETAGREAD_SEEK:
-				m->off += apetagread_offset(&m->apetag);
+				m->off += seek;
 				m->total_size = m->off;
 				m->state = R_APETAG;
 				return MPEG1READ_SEEK;
@@ -167,6 +168,7 @@ static inline int mp3read_process(mp3read *m, ffstr *input, ffstr *output)
 				continue;
 			}
 			break;
+		}
 
 		case R_APETAG: {
 			ffsize len = input->len;

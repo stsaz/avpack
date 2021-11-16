@@ -1,0 +1,71 @@
+/** avpack: APE tag tester
+2021, Simon Zolin
+*/
+
+#include <avpack/apetag.h>
+#include <test/test.h>
+
+void test_apetag()
+{
+	static const char apetag[] = {
+	"\x00\x00\x00\x00\x00\x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+	"\x41\x50\x45\x54\x41\x47\x45\x58\xd0\x07\x00\x00\x8e\x00\x00\x00"
+	"\x03\x00\x00\x00\x00\x00\x00\xa0\x00\x00\x00\x00\x00\x00\x00\x00"
+	"\x07\x00\x00\x00\x00\x00\x00\x00\x4d\x50\x33\x47\x41\x49\x4e\x5f"
+	"\x4d\x49\x4e\x4d\x41\x58\x00\x30\x38\x33\x2c\x32\x31\x30\x0c\x00"
+	"\x00\x00\x00\x00\x00\x00\x52\x45\x50\x4c\x41\x59\x47\x41\x49\x4e"
+	"\x5f\x54\x52\x41\x43\x4b\x5f\x47\x41\x49\x4e\x00\x2b\x30\x2e\x30"
+	"\x36\x30\x30\x30\x30\x20\x64\x42\x08\x00\x00\x00\x00\x00\x00\x00"
+	"\x52\x45\x50\x4c\x41\x59\x47\x41\x49\x4e\x5f\x54\x52\x41\x43\x4b"
+	"\x5f\x50\x45\x41\x4b\x00\x30\x2e\x39\x32\x33\x36\x39\x37\x41\x50"
+	"\x45\x54\x41\x47\x45\x58\xd0\x07\x00\x00\x8e\x00\x00\x00\x03\x00"
+	"\x00\x00\x00\x00\x00\x80\x00\x00\x00\x00\x00\x00\x00\x00"
+	};
+
+	ffstr in;
+	ffstr_set(&in, apetag, sizeof(apetag)-1);
+	int r;
+	struct apetagread a = {};
+	apetagread_open(&a);
+
+	ffint64 seek;
+	r = apetagread_footer(&a, in, &seek);
+	xieq(r, APETAGREAD_SEEK);
+	xieq(seek, -(sizeof(apetag)-1 - 16));
+	in.ptr = (char*)apetag + sizeof(apetag)-1 - (-seek);
+	in.len = -seek;
+
+	struct tag {
+		const char *name, *val;
+	};
+	static const struct tag tags[] = {
+		{"MP3GAIN_MINMAX", "083,210"},
+		{"REPLAYGAIN_TRACK_GAIN", "+0.060000 dB"},
+		{"REPLAYGAIN_TRACK_PEAK", "0.923697"},
+	};
+
+	for (;;) {
+		ffstr name, val;
+		r = apetagread_process(&a, &in, &name, &val);
+		switch (r) {
+		case APETAGREAD_DONE:
+			goto done;
+		default: {
+			x(r <= 0);
+			const struct tag *tag;
+			int k = 0;
+			FFARRAY_FOREACH(tags, tag) {
+				if (ffstr_eqz(&name, tag->name)) {
+					xseq(&val, tag->val);
+					k = 1;
+					break;
+				}
+			}
+			x(k == 1);
+		}
+		}
+	}
+
+done:
+	apetagread_close(&a);
+}

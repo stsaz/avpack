@@ -541,12 +541,13 @@ static inline int mpcread_process(mpcread *m, ffstr *input, ffstr *output)
 			return MPCREAD_SEEK;
 		}
 
-		case R_APETAG_FTR:
+		case R_APETAG_FTR: {
 			apetagread_open(&m->apetag);
-			r = apetagread_footer(&m->apetag, m->chunk);
+			ffint64 seek;
+			r = apetagread_footer(&m->apetag, m->chunk, &seek);
 			switch (r) {
 			case APETAGREAD_SEEK:
-				m->off += apetagread_offset(&m->apetag);
+				m->off += seek;
 				m->total_size = m->off;
 				m->state = R_APETAG;
 				return MPCREAD_SEEK;
@@ -555,6 +556,7 @@ static inline int mpcread_process(mpcread *m, ffstr *input, ffstr *output)
 				break;
 			}
 			break;
+		}
 
 		case R_APETAG: {
 			ffsize len = input->len;

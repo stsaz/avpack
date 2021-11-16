@@ -5,7 +5,6 @@
 /*
 apetagread_open apetagread_close
 apetagread_footer
-apetagread_offset
 apetagread_process
 apetagread_error
 */
@@ -66,18 +65,18 @@ static const ffbyte _apetag_int[] = {
 };
 
 
-struct apetagread {
+typedef struct apetagread {
 	ffuint state;
 	ffvec buf;
 	ffstr chunk;
-	ffint64 offset;
+	ffuint tagsize;
 	ffuint has_hdr;
 	const char *error;
-};
+} apetagread;
 
 static inline void apetagread_open(struct apetagread *a)
 {
-	ffvec_alloc(&a->buf, 1024, 1);
+	(void)a;
 }
 
 static inline void apetagread_close(struct apetagread *a)
@@ -89,8 +88,8 @@ enum APETAGREAD_R {
 	APETAGREAD_MORE = 1, // need more input data
 	APETAGREAD_NO, // not APE tag
 	APETAGREAD_DONE, // done reading
-	APETAGREAD_ERROR,
 	APETAGREAD_SEEK,
+	APETAGREAD_ERROR,
 };
 
 static inline const char* apetagread_error(struct apetagread *a)
@@ -101,13 +100,15 @@ static inline const char* apetagread_error(struct apetagread *a)
 #define _APETAGREAD_ERR(a, e) \
 	(a)->error = (e),  APETAGREAD_ERROR
 
-/** Return enum APETAGREAD_R */
-static inline int apetagread_footer(struct apetagread *a, ffstr input)
+/**
+seek_offset: [output] relative offset (always negative) to the beginning of APE tag
+Return >0: enum APETAGREAD_R */
+static inline int apetagread_footer(struct apetagread *a, ffstr input, ffint64 *seek_offset)
 {
 	switch (a->state) {
 	case 0: {
 		if (input.len < sizeof(struct apetaghdr))
-			return APETAGREAD_ERROR;
+			return _APETAGREAD_ERR(a, "input data too small");
 
 		const struct apetaghdr *h = (struct apetaghdr*)&input.ptr[input.len - sizeof(struct apetaghdr)];
 		ffuint64 size = ffint_le_cpu32_ptr(h->size);
@@ -123,16 +124,14 @@ static inline int apetagread_footer(struct apetagread *a, ffstr input)
 			size += sizeof(struct apetaghdr);
 			a->has_hdr = 1;
 		}
-		a->offset = -(ffint64)size;
+		a->tagsize = size;
+		*seek_offset = -(ffint64)size;
 		a->state = 1;
 		return APETAGREAD_SEEK;
 	}
 	}
-	return APETAGREAD_ERROR;
+	return _APETAGREAD_ERR(a, "invalid parser state");
 }
-
-/** Return relative offset (always negative) to the beginning of APE tag */
-#define apetagread_offset(a)  (a)->offset
 
 /**
 Return >0: enum APETAGREAD_R
@@ -150,7 +149,7 @@ static inline int apetagread_process(struct apetagread *a, ffstr *input, ffstr *
 			return APETAGREAD_ERROR;
 
 		case R_GATHER:
-			r = ffstr_gather((ffstr*)&a->buf, &a->buf.cap, input->ptr, input->len, -a->offset, &a->chunk);
+			r = ffstr_gather((ffstr*)&a->buf, &a->buf.cap, input->ptr, input->len, a->tagsize, &a->chunk);
 			if (r < 0)
 				return _APETAGREAD_ERR(a, "not enough memory");
 			ffstr_shift(input, r);
