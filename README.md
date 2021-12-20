@@ -21,6 +21,7 @@ Contents:
 * convenient for asynchronous I/O model (no I/O callback functions)
 * Audio file formats:
 	* .aac read: `avpack/aac-read.h`
+	* .ape read: `avpack/ape-read.h`
 	* .avi read: `avpack/avi-read.h`
 	* .caf read: `avpack/caf-read.h`
 	* .flac read: `avpack/flac-read.h`

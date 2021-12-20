@@ -56,6 +56,7 @@ ifeq ($(OS),win)
 endif
 OBJ := \
 	$(OUT_DIR)/aac.o \
+	$(OUT_DIR)/ape.o \
 	$(OUT_DIR)/apetag.o \
 	$(OUT_DIR)/avi.o \
 	$(OUT_DIR)/caf.o \
@@ -94,6 +95,11 @@ FFBASE_HDR := $(wildcard $(FFBASE_DIR)/ffbase/*.h)
 $(OUT_DIR)/aac.o: $(AVPACK_DIR)/test/aac.c \
 		$(AVPACK_DIR)/avpack/aac-read.h \
 		$(AVPACK_DIR)/avpack/shared.h \
+		$(FFBASE_HDR)
+	$(C) $(CFLAGS) $< -o $@
+
+$(OUT_DIR)/ape.o: $(AVPACK_DIR)/test/ape.c \
+		$(AVPACK_DIR)/avpack/ape-read.h \
 		$(FFBASE_HDR)
 	$(C) $(CFLAGS) $< -o $@
 

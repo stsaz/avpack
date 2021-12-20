@@ -7,6 +7,7 @@
 #include <avpack/shared.h>
 
 extern void test_aac();
+extern void test_ape();
 extern void test_apetag();
 extern void test_avi();
 extern void test_caf();
@@ -33,6 +34,7 @@ struct test {
 #define T(nm) { #nm, &test_ ## nm }
 static const struct test atests[] = {
 	T(aac),
+	T(ape),
 	T(apetag),
 	T(avi),
 	T(caf),

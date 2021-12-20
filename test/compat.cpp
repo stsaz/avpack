@@ -1,6 +1,7 @@
 /** avpack: C++ compatibility tester
 2021, Simon Zolin */
 
+#include <avpack/ape-read.h>
 #include <avpack/flac-ogg-read.h>
 #include <avpack/flac-read.h>
 #include <avpack/flac-write.h>
