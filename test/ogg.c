@@ -103,7 +103,7 @@ end:
 	oggread_close(&o);
 }
 
-void test_ogg_seek(ffstr data, ffuint delta, int partial)
+void test_ogg_seek(ffstr data, ffuint delta_msec, int partial)
 {
 	int r;
 	ffstr in = {}, out;
@@ -114,8 +114,11 @@ void test_ogg_seek(ffstr data, ffuint delta, int partial)
 	ffuint off = 0;
 	const struct oggread_info *info;
 	ffuint reqs = 0, fileseek = 0;
+	ffuint sample_rate = 44100;
 
-	for (;;) {
+	for (int i = data.len;;  i--) {
+		x(i >= 0);
+
 		r = oggread_process(&o, &in, &out);
 		// xlog("oggread_process: %d", r);
 		switch (r) {
@@ -126,7 +129,7 @@ void test_ogg_seek(ffstr data, ffuint delta, int partial)
 			x(oggread_page_pos(&o) <= seek);
 			x(o.page_endpos > seek);
 
-			seek += delta;
+			seek += delta_msec * sample_rate / 1000;
 			if (seek > info->total_samples)
 				goto end;
 			reqs++;
@@ -176,9 +179,10 @@ void test_ogg()
 	test_ogg_read(data, 3);
 
 #if 0
-	data.ptr = NULL;
+	ffstr_null(&data);
 	file_readall("/tmp/1.ogg", &data);
-	test_ogg_seek(data, 19*48000);
+	test_ogg_seek(data, 900, 64*1024);
+	ffstr_free(&data);
 #endif
 
 	ffvec_free(&buf);

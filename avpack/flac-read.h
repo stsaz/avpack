@@ -194,37 +194,57 @@ static inline void flacread_seek(flacread *f, ffuint64 sample)
 	f->seek_sample = sample;
 }
 
-static int _flacr_seek_init(flacread *f)
+static int _flacr_seek_prepare(flacread *f)
 {
-	if (f->sktab.len == 0) {
-		if (NULL == (f->sktab.ptr = (struct flac_seekpt*)ffmem_calloc(2, sizeof(struct flac_seekpt))))
-			return -1;
-		f->sktab.ptr[0].sample = 0;
-		f->sktab.ptr[0].off = 0;
-		f->sktab.ptr[1].sample = f->info.total_samples;
-		f->sktab.ptr[1].off = f->total_size - f->frame1_off;
-		f->sktab.len = 2;
-	} else {
-		flac_seektab_finish(&f->sktab, f->total_size - f->frame1_off);
+	if (!f->seek_init) {
+		f->seek_init = 1;
+
+		if (f->total_size == 0
+			|| f->info.total_samples == 0)
+			return _FLACR_ERR(f, "can't seek");
+
+		if (f->sktab.len == 0) {
+			if (NULL == (f->sktab.ptr = (struct flac_seekpt*)ffmem_calloc(2, sizeof(struct flac_seekpt))))
+				return _FLACR_ERR(f, "not enough memory");
+			f->sktab.ptr[0].sample = 0;
+			f->sktab.ptr[0].off = 0;
+			f->sktab.ptr[1].sample = f->info.total_samples;
+			f->sktab.ptr[1].off = f->total_size - f->frame1_off;
+			f->sktab.len = 2;
+		} else {
+			flac_seektab_finish(&f->sktab, f->total_size - f->frame1_off);
+		}
 	}
+
+	int r;
+	if (0 > (r = flac_seektab_find(f->sktab.ptr, f->sktab.len, f->seek_sample)))
+		return _FLACR_ERR(f, "can't seek");
+
+	f->seekpt[0] = f->sktab.ptr[r];
+	f->seekpt[0].off += f->frame1_off;
+	f->seekpt[1] = f->sktab.ptr[r + 1];
+	f->seekpt[1].off += f->frame1_off;
 	return 0;
 }
 
 /** Get file offset by audio position */
-static ffuint64 _flacr_seek_offset(const struct flac_seekpt *pt, ffuint64 target)
+static ffuint64 _flacr_seek_offset(const struct flac_seekpt *sp, ffuint64 target, ffuint64 last_seek_off)
 {
-	ffuint64 samples = pt[1].sample - pt[0].sample;
-	ffuint64 size = pt[1].off - pt[0].off;
-	ffuint64 off = (target - pt[0].sample) * size / samples;
-	return pt[0].off + off;
+	ffuint64 samples = sp[1].sample - sp[0].sample;
+	ffuint64 size = sp[1].off - sp[0].off;
+	ffuint64 off = (target - sp[0].sample) * size / samples;
+	off = sp[0].off + off - ffmin(4*1024, off);
+	if (off == last_seek_off)
+		off++;
+	return off;
 }
 
-/** Adjust the search window after the current offset has become too large */
+/** Adjust the search window after the current offset has become too large
+Return >0: new file offset
+  <0: found the target frame */
 static ffint64 _flacr_seek_adjust_edge(flacread *f, struct flac_seekpt *sp, ffuint64 last_seek_off)
 {
 	ffuint64 off;
-	_flacr_log(f, "seek: no new frame at offset %xU", last_seek_off);
-
 	sp[1].off = last_seek_off; // narrow the search window to make some progress
 	if (sp[1].off - sp[0].off > 64*1024)
 		off = sp[0].off + (sp[1].off - sp[0].off) / 2; // binary search
@@ -234,11 +254,12 @@ static ffint64 _flacr_seek_adjust_edge(flacread *f, struct flac_seekpt *sp, ffui
 	if (off == last_seek_off)
 		return -1;
 
+	_flacr_log(f, "seek: no new frame at offset %xU, trying %xU", last_seek_off, off);
 	return off;
 }
 
 /** Adjust the search window
-Return 1 if found the target frame */
+Return <0: found the target frame */
 static int _flacr_seek_adjust(flacread *f, struct flac_seekpt *sp, ffuint64 pos, ffuint64 off, ffuint64 target)
 {
 	_flacr_log(f, "seek: tgt:%xU cur:%xU [%xU..%xU](%xU)  off:%xU [%xU..%xU](%xU)"
@@ -251,8 +272,8 @@ static int _flacr_seek_adjust(flacread *f, struct flac_seekpt *sp, ffuint64 pos,
 	sp[i].sample = pos;
 	sp[i].off = off;
 
-	if (sp[0].off >= sp[1].off)
-		return 1;
+	if (sp[0].off + 1 >= sp[1].off)
+		return -1;
 	return 0;
 }
 
@@ -271,7 +292,7 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 	enum {
 		I_INFO, I_META_NEXT, I_META, I_TAGS, I_PIC, I_SEEK_TBL,
 		I_FRAME, I_DONE,
-		I_SEEK, I_SEEK_OFF, I_SEEK_FRAME,
+		I_SEEK_OFF, I_SEEK_FRAME,
 		I_GATHER,
 	};
 	const ffuint MAX_NOFRAME = 100 * 1024*1024;
@@ -385,9 +406,9 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 
 		case I_FRAME: {
 			if (*(ffuint*)f->first_framehdr != 0 && f->seek_sample != (ffuint64)-1) {
-				f->buf.len = 0;
-				f->buf_off = 0;
-				f->state = I_SEEK;
+				if (0 != _flacr_seek_prepare(f))
+					return FLACREAD_ERROR;
+				f->state = I_SEEK_OFF;
 				continue;
 			}
 
@@ -429,29 +450,11 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 			return FLACREAD_DONE;
 
 
-		case I_SEEK:
-			if (!f->seek_init) {
-				f->seek_init = 1;
-
-				if (f->total_size == 0
-					|| f->info.total_samples == 0)
-					return _FLACR_ERR(f, "can't seek");
-
-				if (0 != _flacr_seek_init(f))
-					return _FLACR_ERR(f, "not enough memory");
-			}
-
-			if (0 > (r = flac_seektab_find(f->sktab.ptr, f->sktab.len, f->seek_sample)))
-				return _FLACR_ERR(f, "can't seek");
-			f->seekpt[0] = f->sktab.ptr[r];
-			f->seekpt[0].off += f->frame1_off;
-			f->seekpt[1] = f->sktab.ptr[r + 1];
-			f->seekpt[1].off += f->frame1_off;
-			// fallthrough
-
 		case I_SEEK_OFF:
-			f->off = _flacr_seek_offset(f->seekpt, f->seek_sample);
+			f->off = _flacr_seek_offset(f->seekpt, f->seek_sample, f->last_seek_off);
 			f->last_seek_off = f->off;
+			f->buf.len = 0;
+			f->buf_off = 0;
 			f->state = I_SEEK_FRAME;
 			return FLACREAD_SEEK;
 
@@ -494,11 +497,7 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 				}
 
 			} else {
-				if (frame_off == f->seekpt[0].off)
-					continue; // try to find a 2nd frame
 				if (!_flacr_seek_adjust(f, f->seekpt, f->frame.pos, frame_off, f->seek_sample)) {
-					f->buf.len = 0;
-					f->buf_off = 0;
 					f->state = I_SEEK_OFF;
 					continue;
 				}

@@ -262,9 +262,12 @@ void test_flac_seek(ffstr data, ffuint delta_msec, int partial)
 	flacread_open(&f, data.len);
 	ffuint seek = 0;
 	ffuint off = 0;
+	ffuint reqs = 0, fileseek = 0;
 	const struct flac_info *info;
 
-	for (;;) {
+	for (int i = data.len;;  i--) {
+		x(i >= 0);
+
 		r = flacread_process(&f, &in, &out);
 		// xlog("flacread_process: %d", r);
 		switch (r) {
@@ -281,10 +284,12 @@ void test_flac_seek(ffstr data, ffuint delta_msec, int partial)
 			seek += delta_msec * info->sample_rate / 1000;
 			if (seek > info->total_samples)
 				goto end;
+			reqs++;
 			flacread_seek(&f, seek);
 			xlog("flacread: seeking to: %u", seek);
 			break;
 		case FLACREAD_SEEK:
+			fileseek++;
 			off = flacread_offset(&f);
 			// fallthrough
 		case FLACREAD_MORE:
@@ -305,6 +310,8 @@ void test_flac_seek(ffstr data, ffuint delta_msec, int partial)
 	}
 
 end:
+	xlog("flacread: seek-reqs:%u  avg-file-seek-reqs:%u"
+		, reqs, fileseek/reqs);
 	flacread_close(&f);
 }
 
@@ -329,9 +336,10 @@ void test_flac()
 	test_flac_read(data, 0, 40961);
 
 #if 0
-	data.ptr = NULL;
+	ffstr_null(&data);
 	file_readall("/tmp/1.flac", &data);
-	test_flac_seek(data, 1000, 64*1024);
+	test_flac_seek(data, 900, 64*1024);
+	ffstr_free(&data);
 #endif
 
 	ffvec_free(&buf);

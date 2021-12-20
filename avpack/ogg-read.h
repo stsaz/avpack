@@ -196,12 +196,15 @@ enum OGGREAD_R {
 };
 
 /** Get file offset by audio position */
-static ffuint64 _oggread_seek_offset(const struct _oggread_seekpoint *pt, ffuint64 target)
+static ffuint64 _oggread_seek_offset(const struct _oggread_seekpoint *sp, ffuint64 target, ffuint64 last_seek_off)
 {
-	ffuint64 samples = pt[1].sample - pt[0].sample;
-	ffuint64 size = pt[1].off - pt[0].off;
-	ffuint64 off = (target - pt[0].sample) * size / samples;
-	return pt[0].off + off;
+	ffuint64 samples = sp[1].sample - sp[0].sample;
+	ffuint64 size = sp[1].off - sp[0].off;
+	ffuint64 off = (target - sp[0].sample) * size / samples;
+	off = sp[0].off + off - ffmin(4*1024, off);
+	if (off == last_seek_off)
+		off++;
+	return off;
 }
 
 /** Adjust the search window after the current offset has become too large */
@@ -424,9 +427,7 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 
 
 		case R_SEEK:
-			o->off = _oggread_seek_offset(o->seekpt, o->seek_sample);
-			if (o->off == o->last_seek_off)
-				return _OGGR_ERR(o, "seek error");
+			o->off = _oggread_seek_offset(o->seekpt, o->seek_sample, o->last_seek_off);
 			o->last_seek_off = o->off;
 			o->buf.len = 0;
 			o->state = R_SEEK_HDR;
