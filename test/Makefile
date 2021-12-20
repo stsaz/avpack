@@ -73,6 +73,7 @@ OBJ := \
 	$(OUT_DIR)/pls.o \
 	$(OUT_DIR)/vorbistag.o \
 	$(OUT_DIR)/wav.o \
+	$(OUT_DIR)/wv.o \
 	$(OUT_DIR)/compat.o
 
 all: $(TESTER)
@@ -218,6 +219,12 @@ $(OUT_DIR)/wav.o: $(AVPACK_DIR)/test/wav.c \
 		$(AVPACK_DIR)/avpack/wav-fmt.h \
 		$(AVPACK_DIR)/avpack/wav-read.h \
 		$(AVPACK_DIR)/avpack/wav-write.h \
+		$(AVPACK_DIR)/avpack/shared.h \
+		$(FFBASE_HDR)
+	$(C) $(CFLAGS) $< -o $@
+
+$(OUT_DIR)/wv.o: $(AVPACK_DIR)/test/wv.c \
+		$(AVPACK_DIR)/avpack/wv-read.h \
 		$(AVPACK_DIR)/avpack/shared.h \
 		$(FFBASE_HDR)
 	$(C) $(CFLAGS) $< -o $@

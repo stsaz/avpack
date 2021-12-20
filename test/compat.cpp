@@ -9,3 +9,4 @@
 // #include <avpack/mkv-read.h>
 #include <avpack/ogg-read.h>
 #include <avpack/ogg-write.h>
+#include <avpack/wv-read.h>

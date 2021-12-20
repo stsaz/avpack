@@ -31,6 +31,7 @@ Contents:
 	* .ogg(FLAC) read: `avpack/flac-ogg-read.h`
 	* .ogg/.opus read/write: `avpack/ogg-read.h`, `avpack/ogg-write.h`
 	* .wav read/write: `avpack/wav-read.h`, `avpack/wav-write.h`
+	* .wv read/write: `avpack/wv-read.h`
 * Audio streams:
 	* ICY stream read: `avpack/icy.h`
 	* MPEG-1 stream read: `avpack/mpeg1-read.h`

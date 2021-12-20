@@ -23,6 +23,7 @@ extern void test_ogg();
 extern void test_pls();
 extern void test_vorbistag();
 extern void test_wav();
+extern void test_wv();
 void test_gather();
 
 struct test {
@@ -49,6 +50,7 @@ static const struct test atests[] = {
 	T(pls),
 	T(vorbistag),
 	T(wav),
+	T(wv),
 };
 #undef T
 
