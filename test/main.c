@@ -10,6 +10,7 @@ extern void test_aac();
 extern void test_ape();
 extern void test_apetag();
 extern void test_avi();
+extern void test_bmp();
 extern void test_caf();
 extern void test_cue();
 extern void test_flac();
@@ -39,6 +40,7 @@ static const struct test atests[] = {
 	T(ape),
 	T(apetag),
 	T(avi),
+	T(bmp),
 	T(caf),
 	T(cue),
 	T(flac),

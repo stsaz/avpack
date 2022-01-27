@@ -59,6 +59,7 @@ OBJ := \
 	$(OUT_DIR)/ape.o \
 	$(OUT_DIR)/apetag.o \
 	$(OUT_DIR)/avi.o \
+	$(OUT_DIR)/bmp.o \
 	$(OUT_DIR)/caf.o \
 	$(OUT_DIR)/cue.o \
 	$(OUT_DIR)/flac.o \
@@ -114,6 +115,11 @@ $(OUT_DIR)/avi.o: $(AVPACK_DIR)/test/avi.c \
 		$(AVPACK_DIR)/avpack/avi-fmt.h \
 		$(AVPACK_DIR)/avpack/avi-read.h \
 		$(AVPACK_DIR)/avpack/shared.h \
+		$(FFBASE_HDR)
+	$(C) $(CFLAGS) $< -o $@
+
+$(OUT_DIR)/bmp.o: $(AVPACK_DIR)/test/bmp.c \
+		$(AVPACK_DIR)/avpack/bmp-read.h \
 		$(FFBASE_HDR)
 	$(C) $(CFLAGS) $< -o $@
 
