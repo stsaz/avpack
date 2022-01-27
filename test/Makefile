@@ -64,6 +64,7 @@ OBJ := \
 	$(OUT_DIR)/flac.o \
 	$(OUT_DIR)/flacogg.o \
 	$(OUT_DIR)/icy.o \
+	$(OUT_DIR)/jpg.o \
 	$(OUT_DIR)/m3u.o \
 	$(OUT_DIR)/main.o \
 	$(OUT_DIR)/mkv.o \
@@ -157,6 +158,11 @@ $(OUT_DIR)/flacogg.o: $(AVPACK_DIR)/test/flacogg.c \
 
 $(OUT_DIR)/icy.o: $(AVPACK_DIR)/test/icy.c \
 		$(AVPACK_DIR)/avpack/icy.h \
+		$(FFBASE_HDR)
+	$(C) $(CFLAGS) $< -o $@
+
+$(OUT_DIR)/jpg.o: $(AVPACK_DIR)/test/jpg.c \
+		$(AVPACK_DIR)/avpack/jpg-read.h \
 		$(FFBASE_HDR)
 	$(C) $(CFLAGS) $< -o $@
 

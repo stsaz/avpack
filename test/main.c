@@ -15,6 +15,7 @@ extern void test_cue();
 extern void test_flac();
 extern void test_flacogg();
 extern void test_icy();
+extern void test_jpg();
 extern void test_m3u();
 extern void test_mkv();
 extern void test_mp3();
@@ -43,6 +44,7 @@ static const struct test atests[] = {
 	T(flac),
 	T(flacogg),
 	T(icy),
+	T(jpg),
 	T(m3u),
 	T(gather),
 	T(mkv),
