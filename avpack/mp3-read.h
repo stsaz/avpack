@@ -101,6 +101,8 @@ static inline int mp3read_process(mp3read *m, ffstr *input, ffstr *output)
 				break;
 			case ID3V2READ_ERROR:
 				m->state = R_FTR_SEEK;
+				// fallthrough
+			case ID3V2READ_WARN:
 				m->rd.error = id3v2read_error(&m->id3v2);
 				return MP3READ_WARN;
 			default:

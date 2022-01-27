@@ -165,6 +165,7 @@ enum ID3V2READ_R {
 	ID3V2READ_MORE = 1, // need more input data
 	ID3V2READ_NO, // not ID3v2 tag
 	ID3V2READ_DONE, // done reading
+	ID3V2READ_WARN,
 	ID3V2READ_ERROR,
 };
 
@@ -173,6 +174,8 @@ enum ID3V2READ_R {
 
 #define _ID3V2READ_ERR(d, e) \
 	(d)->error = (e),  ID3V2READ_ERROR
+#define _ID3V2READ_WARN(d, e) \
+	(d)->error = (e),  ID3V2READ_WARN
 
 static inline const char* id3v2read_error(struct id3v2read *d)
 {
@@ -263,7 +266,7 @@ static int _id3v2read_text_decode(struct id3v2read *d, ffstr in, ffstr *out)
 	case ID3V2_ANSI:
 		n = ffutf8_from_cp(NULL, 0, in.ptr, in.len, d->codepage);
 		if (NULL == ffvec_realloc(b, n, 1))
-			return _ID3V2READ_ERR(d, "not enough memory");
+			return _ID3V2READ_WARN(d, "not enough memory");
 		b->len = ffutf8_from_cp(b->ptr, b->cap, in.ptr, in.len, d->codepage);
 		ffstr_setstr(out, b);
 		break;
@@ -272,12 +275,12 @@ static int _id3v2read_text_decode(struct id3v2read *d, ffstr in, ffstr *out)
 		ffsize len = in.len;
 		r = ffutf_bom(in.ptr, &len);
 		if (!(r == FFUNICODE_UTF16LE || r == FFUNICODE_UTF16BE))
-			return _ID3V2READ_ERR(d, "invalid BOM");
+			return _ID3V2READ_WARN(d, "invalid BOM");
 		ffstr_shift(&in, len);
 
 		n = ffutf8_from_utf16(NULL, 0, in.ptr, in.len, r);
 		if (NULL == ffvec_realloc(b, n, 1))
-			return _ID3V2READ_ERR(d, "not enough memory");
+			return _ID3V2READ_WARN(d, "not enough memory");
 		b->len = ffutf8_from_utf16(b->ptr, b->cap, in.ptr, in.len, r);
 		ffstr_setstr(out, b);
 		break;
@@ -286,13 +289,13 @@ static int _id3v2read_text_decode(struct id3v2read *d, ffstr in, ffstr *out)
 	case ID3V2_UTF16BE:
 		n = ffutf8_from_utf16(NULL, 0, in.ptr, in.len, FFUNICODE_UTF16BE);
 		if (NULL == ffvec_realloc(b, n, 1))
-			return _ID3V2READ_ERR(d, "not enough memory");
+			return _ID3V2READ_WARN(d, "not enough memory");
 		b->len = ffutf8_from_utf16(b->ptr, b->cap, in.ptr, in.len, FFUNICODE_UTF16BE);
 		ffstr_setstr(out, b);
 		break;
 
 	default:
-		return _ID3V2READ_ERR(d, "invalid encoding");
+		return _ID3V2READ_WARN(d, "invalid encoding");
 	}
 
 	return 0xdeed;
@@ -467,13 +470,13 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 				break;
 			}
 
+			d->state = R_FR;
+
 			if (0xdeed != (r = _id3v2read_text_decode(d, d->chunk, value)))
 				return r;
 
 			if (value->len != 0 && *ffslice_lastT(value, char) == '\0')
 				value->len--;
-
-			d->state = R_FR;
 
 			switch (d->tag) {
 			case MMTAG_TRACKNO:
@@ -513,6 +516,8 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 	}
 }
 
+#undef _ID3V2READ_ERR
+#undef _ID3V2READ_WARN
 
 struct id3v2write {
 	ffvec buf;
