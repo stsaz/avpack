@@ -45,6 +45,10 @@ Contents:
 	* APETAG read: `avpack/apetag.h`
 	* ID3v1 & ID3v2 read/write: `avpack/id3v1.h`, `avpack/id3v2.h`
 	* Vorbis tags read/write: `avpack/vorbistag.h`
+* Graphics:
+	* .bmp read: `avpack/bmp-read.h`
+	* .jpg read: `avpack/jpg-read.h`
+	* .png read: `avpack/png-read.h`
 
 It doesn't contain code that reads or writes files - this is user's responsibility.
 
