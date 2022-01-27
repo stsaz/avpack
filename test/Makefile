@@ -72,6 +72,7 @@ OBJ := \
 	$(OUT_DIR)/mpc.o \
 	$(OUT_DIR)/ogg.o \
 	$(OUT_DIR)/pls.o \
+	$(OUT_DIR)/png.o \
 	$(OUT_DIR)/vorbistag.o \
 	$(OUT_DIR)/wav.o \
 	$(OUT_DIR)/wv.o \
@@ -213,6 +214,11 @@ $(OUT_DIR)/ogg.o: $(AVPACK_DIR)/test/ogg.c \
 
 $(OUT_DIR)/pls.o: $(AVPACK_DIR)/test/pls.c \
 		$(AVPACK_DIR)/avpack/pls.h \
+		$(FFBASE_HDR)
+	$(C) $(CFLAGS) $< -o $@
+
+$(OUT_DIR)/png.o: $(AVPACK_DIR)/test/png.c \
+		$(AVPACK_DIR)/avpack/png-read.h \
 		$(FFBASE_HDR)
 	$(C) $(CFLAGS) $< -o $@
 

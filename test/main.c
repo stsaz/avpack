@@ -22,6 +22,7 @@ extern void test_mp4();
 extern void test_mpc();
 extern void test_ogg();
 extern void test_pls();
+extern void test_png();
 extern void test_vorbistag();
 extern void test_wav();
 extern void test_wv();
@@ -50,6 +51,7 @@ static const struct test atests[] = {
 	T(mpc),
 	T(ogg),
 	T(pls),
+	T(png),
 	T(vorbistag),
 	T(wav),
 	T(wv),
