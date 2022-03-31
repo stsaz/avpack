@@ -112,7 +112,7 @@ typedef struct id3v1read {
 } id3v1read;
 
 enum ID3V1READ_R {
-	ID3V1READ_NO,
+	ID3V1READ_NO = 1,
 	ID3V1READ_DONE,
 };
 

@@ -342,7 +342,7 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 				return ID3V2READ_NO;
 
 			d->tagsize = _id3v2_int7_read(h->size);
-			d->total_size = d->tagsize;
+			d->total_size = d->tagsize + sizeof(struct id3v2_hdr);
 			d->ver = h->ver[0];
 			d->hdrflags = h->flags;
 

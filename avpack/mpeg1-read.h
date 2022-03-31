@@ -147,6 +147,7 @@ static inline void _mpeg1read_info(mpeg1read *m, ffstr data)
 		i->bitrate = mpeg1_bitrate(h);
 		i->total_samples = m->total_size * mpeg1_samples(h) / frsz;
 		i->vbr_scale = -1;
+		i->delay = DEC_DELAY;
 		return;
 	}
 
