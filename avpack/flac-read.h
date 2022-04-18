@@ -31,14 +31,13 @@ typedef void (*flac_log_t)(void *udata, ffstr msg);
 typedef struct flacread {
 	ffuint state, nextstate;
 	const char *error;
-	ffvec buf;
+	struct avp_stream stream;
 	ffstr chunk;
 	ffsize gather;
 	ffuint64 off;
 	ffuint64 total_size;
 	struct flac_frame frame;
 	ffbyte first_framehdr[4];
-	ffsize buf_off;
 	ffuint fin;
 	ffuint last_hdr_block;
 
@@ -84,11 +83,12 @@ static inline void flacread_open(flacread *f, ffuint64 total_size)
 {
 	f->total_size = total_size;
 	f->seek_sample = (ffuint64)-1;
+	_avp_stream_realloc(&f->stream, 64*1024);
 }
 
 static inline void flacread_close(flacread *f)
 {
-	ffvec_free(&f->buf);
+	_avp_stream_free(&f->stream);
 	ffmem_free(f->sktab.ptr);
 }
 
@@ -111,44 +111,37 @@ static inline void _flacr_log(flacread *f, const char *fmt, ...)
 /** Find FLAC header */
 static int _flacr_hdr_find(flacread *f, ffstr *input, ffuint *islastblock)
 {
-	int r, pos, r2;
+	int pos;
 	ffstr chunk = {};
 
 	for (;;) {
-
-		r = _avpack_gather_header(&f->buf, *input, FLAC_HDR_MINSIZE, &chunk);
+		int r = _avp_stream_gather(&f->stream, *input, FLAC_HDR_MINSIZE, &chunk);
 		ffstr_shift(input, r);
 		f->off += r;
-		if (chunk.len == 0) {
+		if (chunk.len < FLAC_HDR_MINSIZE) {
 			return -0xfeed;
 		}
 
 		pos = ffstr_find(&chunk, FLAC_SYNC, 4);
 		if (pos >= 0) {
-			if (chunk.ptr != f->buf.ptr) {
-				ffstr_shift(input, FLAC_HDR_MINSIZE + pos);
-				f->off += FLAC_HDR_MINSIZE + pos;
-			}
-			ffstr_shift(&chunk, pos);
-
-			r2 = flac_info_read(chunk, &f->info, islastblock);
-			if (r2 > 0) {
-				break;
-			} else if (r2 < 0) {
+			ffstr h = chunk;
+			ffstr_shift(&h, pos);
+			r = flac_info_read(h, &f->info, islastblock);
+			if (r <= 0) {
 				f->error = "invalid FLAC header";
 				return -0xbad;
 			}
+			pos += r;
+			break;
 		}
 
-		r = _avpack_gather_trailer(&f->buf, *input, FLAC_HDR_MINSIZE, r);
-		input->ptr += r,  input->len -= r;
-		f->off += r;
+		_avp_stream_consume(&f->stream, chunk.len - (FLAC_HDR_MINSIZE-1));
 	}
 
 	if (f->total_size != 0 && f->info.total_samples != 0)
 		f->info.bitrate = f->total_size * 8 * f->info.sample_rate / f->info.total_samples;
 
-	return pos + r2;
+	return pos;
 }
 
 /**
@@ -291,9 +284,9 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 {
 	enum {
 		I_INFO, I_META_NEXT, I_META, I_TAGS, I_PIC, I_SEEK_TBL,
-		I_FRAME, I_DONE,
+		I_FRAME, I_FRAME_CHK, I_DONE,
 		I_SEEK_OFF, I_SEEK_FRAME,
-		I_GATHER,
+		I_GATHER, I_GATHER_SOME,
 	};
 	const ffuint MAX_NOFRAME = 100 * 1024*1024;
 	int r;
@@ -310,26 +303,27 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 				return FLACREAD_MORE;
 			}
 
-			if (f->buf.len != 0)
-				ffstr_erase_left((ffstr*)&f->buf, r);
-
+			_avp_stream_consume(&f->stream, r);
 			f->state = I_META_NEXT;
 			return FLACREAD_HEADER;
 
 		case I_GATHER:
-			r = ffstr_gather((ffstr*)&f->buf, &f->buf.cap, input->ptr, input->len, f->gather, &f->chunk);
-			if (r < 0)
+		case I_GATHER_SOME:
+			if (0 != _avp_stream_realloc(&f->stream, f->gather))
 				return _FLACR_ERR(f, "not enough memory");
+			r = _avp_stream_gather(&f->stream, *input, f->gather, &f->chunk);
 			ffstr_shift(input, r);
 			f->off += r;
-			if (f->chunk.len == 0)
+			if (f->chunk.len < f->gather && f->state == I_GATHER)
 				return FLACREAD_MORE;
-			f->buf.len = 0;
+			if (f->state == I_GATHER)
+				_avp_stream_consume(&f->stream, f->gather);
 			f->state = f->nextstate;
 			continue;
 
 		case I_META_NEXT:
 			if (f->last_hdr_block) {
+				f->gather = 16*1024;
 				f->state = I_FRAME;
 				f->frame1_off = (ffuint)f->off;
 				return FLACREAD_HEADER_FIN;
@@ -341,11 +335,12 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 			ffuint blksize;
 			r = flac_hdr_read(f->chunk.ptr, &blksize, &f->last_hdr_block);
 
-			f->state = I_META_NEXT;
-
 			const ffuint MAX_META = 16 * 1024*1024;
-			if (f->off + blksize > MAX_META)
+			ffuint next_field_off = f->off - f->chunk.len + sizeof(struct flac_hdr) + blksize;
+			if (next_field_off > MAX_META)
 				return _FLACR_ERR(f, "too large meta");
+
+			f->state = I_META_NEXT;
 
 			switch (r) {
 			case FLAC_TSEEKTABLE:
@@ -361,7 +356,7 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 				continue;
 			}
 
-			f->off += blksize;
+			f->off = next_field_off;
 			return FLACREAD_SEEK; // skip meta block
 		}
 
@@ -403,8 +398,7 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 			}
 			continue;
 
-
-		case I_FRAME: {
+		case I_FRAME:
 			if (*(ffuint*)f->first_framehdr != 0 && f->seek_sample != (ffuint64)-1) {
 				if (0 != _flacr_seek_prepare(f))
 					return FLACREAD_ERROR;
@@ -412,30 +406,32 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 				continue;
 			}
 
-			if (input->len != ffvec_add2(&f->buf, input, 1))
-				return _FLACR_ERR(f, "not enough memory");
-			f->off += input->len;
-			ffstr_shift(input, input->len);
+			f->state = I_GATHER_SOME,  f->nextstate = I_FRAME_CHK;
+			continue;
 
-			ffstr d = FFSTR_INITSTR(&f->buf);
-			ffstr_shift(&d, f->buf_off);
-			r = _flacr_frame_get(f, d, &f->frame, output);
+		case I_FRAME_CHK:
+			f->state = I_FRAME;
+			r = _flacr_frame_get(f, f->chunk, &f->frame, output);
 			if (r == -0xfeed || r == -0xfeed2) {
 				if (!f->fin) {
 
-					if (f->buf.len > MAX_NOFRAME)
+					if (f->gather > MAX_NOFRAME)
 						return _FLACR_ERR(f, "can't find frame");
 
-					ffstr_erase_left((ffstr*)&f->buf, f->buf_off);
-					f->buf_off = 0;
+					if (f->chunk.len >= f->gather)
+						f->gather *= 2; // can't find 2 frames in our limited region: increase the size
+
+					if (input->len != 0)
+						continue;
+
 					return FLACREAD_MORE;
 				}
-				if (r == -0xfeed || f->buf.len == 0)
+				if (r == -0xfeed || f->chunk.len == 0)
 					return FLACREAD_DONE;
-				ffstr_setstr(output, &f->buf);
+				*output = f->chunk; // use all we have
 				f->state = I_DONE;
 			} else {
-				f->buf_off += r;
+				_avp_stream_consume(&f->stream, r);
 			}
 
 			if (f->seek_sample != (ffuint64)-1)
@@ -444,7 +440,6 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 			_flacr_log(f, "frame #%d: pos:%U  size:%L, samples:%u"
 				, f->frame.num, f->frame.pos, output->len, f->frame.samples);
 			return FLACREAD_DATA;
-		}
 
 		case I_DONE:
 			return FLACREAD_DONE;
@@ -453,46 +448,42 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 		case I_SEEK_OFF:
 			f->off = _flacr_seek_offset(f->seekpt, f->seek_sample, f->last_seek_off);
 			f->last_seek_off = f->off;
-			f->buf.len = 0;
-			f->buf_off = 0;
-			f->state = I_SEEK_FRAME;
+			_avp_stream_reset(&f->stream);
+			f->state = I_GATHER_SOME,  f->nextstate = I_SEEK_FRAME;
 			return FLACREAD_SEEK;
 
 		case I_SEEK_FRAME: {
-			if (input->len != ffvec_add2(&f->buf, input, 1))
-				return _FLACR_ERR(f, "not enough memory");
-			f->off += input->len;
-			ffstr_shift(input, input->len);
-
-			ffstr d = FFSTR_INITSTR(&f->buf);
-			ffstr_shift(&d, f->buf_off);
-			r = _flacr_frame_get(f, d, &f->frame, output);
+			ffuint64 frame_off;
+			r = _flacr_frame_get(f, f->chunk, &f->frame, output);
 			if (r == -0xfeed || r == -0xfeed2) {
 				if (!f->fin) {
 
-					if (f->buf.len > MAX_NOFRAME)
+					if (f->gather > MAX_NOFRAME)
 						return _FLACR_ERR(f, "can't find frame");
 
-					ffstr_erase_left((ffstr*)&f->buf, f->buf_off);
-					f->buf_off = 0;
+					if (f->chunk.len >= f->gather)
+						f->gather *= 2; // can't find 2 frames in our limited region: increase the size
+
+					if (input->len != 0) {
+						f->state = I_GATHER_SOME,  f->nextstate = I_SEEK_FRAME;
+						continue;
+					}
+
 					return FLACREAD_MORE;
 				}
 				f->fin = 0;
-				ffstr_setstr(output, &f->buf);
-				f->buf_off += f->buf.len;
+				*output = f->chunk; // use all we have
+				frame_off = f->off - f->chunk.len;
 			} else {
-				f->buf_off += r;
+				frame_off = f->off - f->chunk.len + r - output->len;
 			}
-
-			ffuint64 frame_off = f->off - f->buf.len + f->buf_off - output->len;
 
 			if (r == -0xfeed || frame_off >= f->seekpt[1].off) {
 				ffint64 o = _flacr_seek_adjust_edge(f, f->seekpt, f->last_seek_off);
 				if (o >= 0) {
 					f->off = o;
 					f->last_seek_off = f->off;
-					f->buf.len = 0;
-					f->buf_off = 0;
+					_avp_stream_reset(&f->stream);
 					return FLACREAD_SEEK;
 				}
 
@@ -505,8 +496,7 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 
 			f->off = f->seekpt[0].off;
 			f->seek_sample = (ffuint64)-1;
-			f->buf.len = 0;
-			f->buf_off = 0;
+			_avp_stream_reset(&f->stream);
 			f->state = I_FRAME;
 			return FLACREAD_SEEK;
 		}
