@@ -29,6 +29,7 @@ extern void test_vorbistag();
 extern void test_wav();
 extern void test_wv();
 void test_gather();
+void test_stream();
 
 struct test {
 	const char *name;
@@ -45,10 +46,10 @@ static const struct test atests[] = {
 	T(cue),
 	T(flac),
 	T(flacogg),
+	T(gather),
 	T(icy),
 	T(jpg),
 	T(m3u),
-	T(gather),
 	T(mkv),
 	T(mp3),
 	T(mp4),
@@ -56,6 +57,7 @@ static const struct test atests[] = {
 	T(ogg),
 	T(pls),
 	T(png),
+	T(stream),
 	T(vorbistag),
 	T(wav),
 	T(wv),
@@ -107,6 +109,57 @@ void test_gather()
 		gather(d, i);
 		xlog("");
 	}
+}
+
+void test_stream()
+{
+	struct avp_stream s = {};
+	_avp_stream_realloc(&s, 8);
+	int r;
+	ffstr in;
+	ffstr v;
+
+	// empty -> some
+	ffstr_setz(&in, "12");
+	r = _avp_stream_gather(&s, in, 4, &v);
+	x(r == 2);
+	xseq(&v, "12");
+
+	// some -> middle
+	ffstr_setz(&in, "345");
+	r = _avp_stream_gather(&s, in, 4, &v);
+	x(r == 3);
+	xseq(&v, "12345");
+	_avp_stream_consume(&s, 2); // "..345"
+
+	// middle -> full
+	ffstr_setz(&in, "678");
+	r = _avp_stream_gather(&s, in, 6, &v);
+	x(r == 3);
+	xseq(&v, "345678");
+	_avp_stream_consume(&s, 6); // "........"
+
+	// full -> (move) middle
+	ffstr_setz(&in, "1234");
+	r = _avp_stream_gather(&s, in, 3, &v);
+	x(r == 4);
+	xseq(&v, "1234");
+	x(v.ptr == s.ptr);
+	_avp_stream_consume(&s, 2); // "..34"
+
+	// middle -> (move) middle
+	ffstr_setz(&in, "56789abc");
+	r = _avp_stream_gather(&s, in, 7, &v);
+	x(r == 6);
+	xseq(&v, "3456789a");
+	x(v.ptr == s.ptr);
+
+	x(0 == _avp_stream_realloc(&s, 12));
+	x(s.cap == 16);
+	v = _avp_stream_view(&s);
+	xseq(&v, "3456789a");
+
+	_avp_stream_free(&s);
 }
 
 int main(int argc, const char **argv)
