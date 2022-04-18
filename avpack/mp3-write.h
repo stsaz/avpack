@@ -145,11 +145,15 @@ static inline int mp3write_process(mp3write *m, ffstr *input, ffstr *output, int
 			if (m->options & MP3WRITE_XINGTAG) {
 				if (input->len < 4)
 					return MP3WRITE_ERROR; // bad input data
-				ffuint n = mpeg1_size(input->ptr);
+				char h[4];
+				*(ffuint*)h = *(ffuint*)input->ptr;
+				h[2] = (h[2] & 0xf0) | 9; // bitrate=128
+				ffuint n = mpeg1_size(h);
 				if (NULL == ffvec_realloc(&m->buf, n, 1))
 					return MP3WRITE_ERROR; // not enough memory
-				ffmem_copy(m->frame1, input->ptr, 4);
 				ffmem_zero(m->buf.ptr, n);
+				ffmem_copy(m->buf.ptr, h, 4);
+				ffmem_copy(m->frame1, h, 4);
 				ffstr_set(output, m->buf.ptr, n);
 				return MP3WRITE_DATA;
 			}

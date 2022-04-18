@@ -253,7 +253,7 @@ static inline int mpeg1_xing_read(struct mpeg1_info *info, const void *data, ffs
 
 	ffuint flags = ffint_be_cpu32_ptr(&d[i]);
 	i += 4;
-	if (i + mpeg1_xing_size(flags) > len)
+	if (i-4-4 + mpeg1_xing_size(flags) > len)
 		return -1;
 
 	if (flags & MPEG1_XING_FRAMES) {

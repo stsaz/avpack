@@ -20,19 +20,20 @@ mpeg1read_cursample
 #include <avpack/shared.h>
 
 struct mpeg1read_info {
+	ffuint layer; // 1..3
 	ffuint sample_rate;
 	ffuint channels;
 	ffuint bitrate;
 	ffuint64 total_samples;
 	int vbr_scale; // -1:CBR; 100(worst)..0(best)
-	ffuint delay;
+	ffuint delay, padding; // (in samples)
 };
 
 typedef struct mpeg1read {
 	ffuint state, nextstate;
 	const char *error;
 	ffuint gather_size;
-	ffvec buf;
+	struct avp_stream stream;
 	ffstr chunk;
 	ffuint64 off, frame1_off;
 	ffuint64 cur_sample, seek_sample;
@@ -49,17 +50,17 @@ static inline void mpeg1read_open(mpeg1read *m, ffuint64 total_size)
 {
 	m->seek_sample = (ffuint64)-1;
 	m->total_size = total_size;
-	ffvec_alloc(&m->buf, 4096, 1);
+	_avp_stream_realloc(&m->stream, 4096);
 }
 
 static inline void mpeg1read_close(mpeg1read *m)
 {
-	ffvec_free(&m->buf);
+	_avp_stream_free(&m->stream);
 }
 
 enum MPEG1READ_R {
 	MPEG1READ_MORE,
-	MPEG1READ_HEADER,
+	MPEG1READ_HEADER, // 'output' contains Xing tag data
 	MPEG1READ_DATA, // data packet
 
 	/** Need input data at absolute file offset = mpeg1read_offset()
@@ -75,37 +76,23 @@ static int _mpeg1read_hdr_find(mpeg1read *m, ffstr *input, ffstr *output)
 	ffstr chunk = {};
 
 	for (;;) {
-
-		r = _avpack_gather_header(&m->buf, *input, 4, &chunk);
+		r = _avp_stream_gather(&m->stream, *input, 4, &chunk);
 		ffstr_shift(input, r);
 		m->off += r;
-		if (chunk.len == 0) {
-			ffstr_null(output);
+		if (chunk.len < 4)
 			return 0xfeed;
-		}
 
 		pos = mpeg1_find(chunk);
 		if (pos != 0)
 			m->unrecognized_data = 1;
 		if (pos >= 0)
 			break;
-
-		r = _avpack_gather_trailer(&m->buf, *input, 4, r);
-		// r<0: ffstr_shift() isn't suitable due to assert()
-		input->ptr += r,  input->len -= r;
-		m->off += r;
+		_avp_stream_consume(&m->stream, chunk.len - (4-1));
 	}
 
-	if (chunk.ptr == input->ptr) {
-		ffstr_shift(input, 4 + pos);
-		m->off += 4 + pos;
-	}
-	ffstr_set(output, &chunk.ptr[pos], 4);
-	if (m->buf.len != 0) {
-		ffstr_erase_left((ffstr*)&m->buf, pos);
-		ffstr_set(output, m->buf.ptr, 4);
-	}
-
+	_avp_stream_consume(&m->stream, pos);
+	ffstr_shift(&chunk, pos);
+	*output = chunk;
 	return 0;
 }
 
@@ -117,13 +104,14 @@ static inline const char* mpeg1read_error(mpeg1read *m)
 #define _MPEG1R_ERR(m, e) \
 	(m)->error = (e),  MPEG1READ_ERROR
 
-static inline void _mpeg1read_info(mpeg1read *m, ffstr data)
+/**
+Return info frame size */
+static inline int _mpeg1read_info(mpeg1read *m, ffstr data, ffuint frsz)
 {
 	struct mpeg1read_info *i = &m->info;
 	const ffuint DEC_DELAY = 528+1;
 	int r;
 	const void *h = data.ptr;
-	ffuint frsz = mpeg1_size(h);
 	const void *next = &data.ptr[frsz];
 	ffuint padding = 0;
 
@@ -139,30 +127,35 @@ static inline void _mpeg1read_info(mpeg1read *m, ffstr data)
 				padding = lame.enc_padding - DEC_DELAY;
 		}
 
-	} else if (mpeg1_vbri_read(&xing, data.ptr, frsz) > 0) {
+		h = next;
 
-	} else {
-		i->sample_rate = mpeg1_sample_rate(h);
-		i->channels = mpeg1_channels(h);
-		i->bitrate = mpeg1_bitrate(h);
-		i->total_samples = m->total_size * mpeg1_samples(h) / frsz;
-		i->vbr_scale = -1;
-		i->delay = DEC_DELAY;
-		return;
+	} else if (mpeg1_vbri_read(&xing, data.ptr, frsz) > 0) {
+		h = next;
 	}
 
-	i->sample_rate = mpeg1_sample_rate(next);
-	i->channels = mpeg1_channels(next);
-	if (xing.frames != 0)
-		i->total_samples = xing.frames * mpeg1_samples(next);
+	ffuint l = (((char*)h)[1] & 0x06) >> 1;
+	i->layer = (~l & 3) + 1; // 1 <-> 3
 
-	i->bitrate = mpeg1_bitrate(next);
+	i->sample_rate = mpeg1_sample_rate(h);
+	i->channels = mpeg1_channels(h);
+	if (xing.frames != 0)
+		i->total_samples = xing.frames * mpeg1_samples(h);
+
+	i->bitrate = mpeg1_bitrate(h);
 	if (xing.vbr_scale >= 0 && i->total_samples != 0)
 		i->bitrate = m->total_size * 8 * i->sample_rate / i->total_samples;
 
+	if (h != next) {
+		i->total_samples = m->total_size * mpeg1_samples(h) / frsz;
+		i->vbr_scale = -1;
+		return 0;
+	}
+
 	i->vbr_scale = xing.vbr_scale;
 	i->delay = xing.delay + DEC_DELAY;
+	i->padding = padding;
 	i->total_samples -= ffmin(i->delay + padding, i->total_samples);
+	return frsz;
 }
 
 /**
@@ -178,7 +171,7 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 		R_HDR_FIND, R_HDR2,
 		R_HDR,
 		R_FRAME, R_FRAME_NEXT,
-		R_GATHER, R_GATHER_MORE,
+		R_GATHER,
 	};
 	int r;
 	const void *h;
@@ -186,20 +179,11 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 	for (;;) {
 		switch (m->state) {
 
-		case R_GATHER_MORE:
-			if (m->buf.len == 0) {
-				if (m->chunk.len != ffvec_add2T(&m->buf, &m->chunk, char))
-					return _MPEG1R_ERR(m, "not enough memory");
-			}
-			m->state = R_GATHER;
-			// fallthrough
 		case R_GATHER:
-			r = ffstr_gather((ffstr*)&m->buf, &m->buf.cap, input->ptr, input->len, m->gather_size, &m->chunk);
-			if (r < 0)
-				return _MPEG1R_ERR(m, "not enough memory");
+			r = _avp_stream_gather(&m->stream, *input, m->gather_size, &m->chunk);
 			ffstr_shift(input, r);
 			m->off += r;
-			if (m->chunk.len == 0)
+			if (m->chunk.len < m->gather_size)
 				return MPEG1READ_MORE;
 			m->state = m->nextstate;
 			continue;
@@ -214,21 +198,15 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 				// _mpeg1read_log(m, "unrecognized data before MPEG header");
 			}
 
-			m->state = R_GATHER_MORE,  m->nextstate = R_HDR2,  m->gather_size = mpeg1_size(m->chunk.ptr) + 4;
+			m->state = R_GATHER,  m->nextstate = R_HDR2,  m->gather_size = mpeg1_size(m->chunk.ptr) + 4;
 			continue;
 
 		case R_HDR2: {
-			r = mpeg1_size(m->chunk.ptr);
+			r = m->gather_size - 4;
 			const void *h2 = &m->chunk.ptr[r];
 			if (!(mpeg1_valid(h2)
 				&& mpeg1_match(m->chunk.ptr, h2))) {
-				if (m->buf.len != 0) {
-					ffstr_erase_left((ffstr*)&m->buf, 1);
-				} else if (&m->chunk.ptr[m->chunk.len] == input->ptr) {
-					ffuint n = m->chunk.len - 1;
-					input->ptr += n,  input->len -= n;
-					m->off -= n;
-				}
+				_avp_stream_consume(&m->stream, 1);
 				m->state = R_HDR_FIND;
 				continue;
 			}
@@ -236,9 +214,15 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 			m->state = R_HDR;
 
 			if (m->info.sample_rate == 0) {
-				_mpeg1read_info(m, m->chunk);
-				m->frame1_off = m->off - m->chunk.len;
+				r = _mpeg1read_info(m, m->chunk, r);
+				m->frame1_off = m->off - m->chunk.len + r;
 				ffmem_copy(m->prev_hdr, m->chunk.ptr, 4);
+				if (r != 0) {
+					// skip and return Xing tag
+					ffstr_set(output, m->chunk.ptr, r);
+					ffstr_shift(&m->chunk, r);
+					_avp_stream_consume(&m->stream, r);
+				}
 				return MPEG1READ_HEADER;
 			}
 
@@ -258,7 +242,7 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 					m->off = m->frame1_off + m->seek_sample * m->total_size / m->info.total_samples;
 				m->cur_sample = m->seek_sample;
 				m->seek_sample = (ffuint64)-1;
-				m->buf.len = 0;
+				_avp_stream_reset(&m->stream);
 				m->state = R_HDR_FIND;
 				return MPEG1READ_SEEK;
 			}
@@ -270,18 +254,17 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 			}
 
 			ffmem_copy(m->prev_hdr, h, 4);
-			m->state = R_GATHER_MORE,  m->nextstate = R_FRAME,  m->gather_size = mpeg1_size(h);
+			m->state = R_GATHER,  m->nextstate = R_FRAME,  m->gather_size = mpeg1_size(h);
 			continue;
 
 		case R_FRAME:
-			ffstr_setstr(output, &m->chunk);
+			ffstr_set(output, m->chunk.ptr, m->gather_size);
 			m->state = R_FRAME_NEXT;
 			return MPEG1READ_DATA;
 
 		case R_FRAME_NEXT:
+			_avp_stream_consume(&m->stream, m->gather_size);
 			m->cur_sample += mpeg1_samples(m->prev_hdr);
-			if (m->buf.len != 0)
-				ffstr_erase_left((ffstr*)&m->buf, m->gather_size);
 			m->state = R_GATHER,  m->nextstate = R_HDR,  m->gather_size = 4;
 			continue;
 		}
