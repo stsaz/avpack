@@ -279,7 +279,10 @@ void test_flac_seek(ffstr data, ffuint delta_msec, int partial)
 		case FLACREAD_HEADER_FIN:
 			break;
 		case FLACREAD_DATA:
-			x(flacread_cursample(&f) <= seek);
+			if (seek != 0) {
+				x(flacread_cursample(&f) <= seek);
+				x(seek < flacread_cursample(&f) + f.frame.samples);
+			}
 
 			seek += delta_msec * info->sample_rate / 1000;
 			if (seek > info->total_samples)

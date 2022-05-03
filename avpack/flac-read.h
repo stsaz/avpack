@@ -247,7 +247,7 @@ static ffint64 _flacr_seek_adjust_edge(flacread *f, struct flac_seekpt *sp, ffui
 	if (off == last_seek_off)
 		return -1;
 
-	_flacr_log(f, "seek: no new frame at offset %xU, trying %xU", last_seek_off, off);
+	_flacr_log(f, "seek: no new frame at offset %U, trying %U", last_seek_off, off);
 	return off;
 }
 
@@ -255,7 +255,7 @@ static ffint64 _flacr_seek_adjust_edge(flacread *f, struct flac_seekpt *sp, ffui
 Return <0: found the target frame */
 static int _flacr_seek_adjust(flacread *f, struct flac_seekpt *sp, ffuint64 pos, ffuint64 off, ffuint64 target)
 {
-	_flacr_log(f, "seek: tgt:%xU cur:%xU [%xU..%xU](%xU)  off:%xU [%xU..%xU](%xU)"
+	_flacr_log(f, "seek: tgt:%U cur:%U [%U..%U](%U)  off:%U [%U..%U](%U)"
 		, target, pos
 		, sp[0].sample, sp[1].sample, sp[1].sample - sp[0].sample
 		, off
@@ -356,6 +356,7 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 				continue;
 			}
 
+			_avp_stream_reset(&f->stream);
 			f->off = next_field_off;
 			return FLACREAD_SEEK; // skip meta block
 		}
@@ -437,8 +438,9 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 			if (f->seek_sample != (ffuint64)-1)
 				continue; // f->first_framehdr is set, now we may seek
 
-			_flacr_log(f, "frame #%d: pos:%U  size:%L, samples:%u"
-				, f->frame.num, f->frame.pos, output->len, f->frame.samples);
+			_flacr_log(f, "frame #%d: pos:%U  samples:%u  off:%U  size:%L"
+				, f->frame.num, f->frame.pos, f->frame.samples
+				, f->off - f->chunk.len, output->len);
 			return FLACREAD_DATA;
 
 		case I_DONE:
@@ -483,6 +485,7 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 				if (o >= 0) {
 					f->off = o;
 					f->last_seek_off = f->off;
+					f->chunk.len = 0;
 					_avp_stream_reset(&f->stream);
 					return FLACREAD_SEEK;
 				}
