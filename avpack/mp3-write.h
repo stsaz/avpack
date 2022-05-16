@@ -147,7 +147,7 @@ static inline int mp3write_process(mp3write *m, ffstr *input, ffstr *output, int
 					return MP3WRITE_ERROR; // bad input data
 				char h[4];
 				*(ffuint*)h = *(ffuint*)input->ptr;
-				h[2] = (h[2] & 0xf0) | 9; // bitrate=128
+				h[2] = 0x90 | (h[2] & 0x0f); // bitrate=128
 				ffuint n = mpeg1_size(h);
 				if (NULL == ffvec_realloc(&m->buf, n, 1))
 					return MP3WRITE_ERROR; // not enough memory
