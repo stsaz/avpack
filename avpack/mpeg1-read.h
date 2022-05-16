@@ -230,6 +230,7 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 		}
 
 		case R_HDR:
+		case R_FRAME:
 			if (m->seek_sample != (ffuint64)-1) {
 
 				if (m->total_size == 0
@@ -247,17 +248,19 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 				return MPEG1READ_SEEK;
 			}
 
-			h = m->chunk.ptr;
-			if (!mpeg1_match(h, m->prev_hdr)) {
-				m->state = R_HDR_FIND;
+			if (m->state == R_HDR) {
+				h = m->chunk.ptr;
+				if (!mpeg1_match(h, m->prev_hdr)) {
+					m->state = R_HDR_FIND;
+					continue;
+				}
+
+				ffmem_copy(m->prev_hdr, h, 4);
+				m->state = R_GATHER,  m->nextstate = R_FRAME,  m->gather_size = mpeg1_size(h);
 				continue;
 			}
 
-			ffmem_copy(m->prev_hdr, h, 4);
-			m->state = R_GATHER,  m->nextstate = R_FRAME,  m->gather_size = mpeg1_size(h);
-			continue;
-
-		case R_FRAME:
+		// case R_FRAME:
 			ffstr_set(output, m->chunk.ptr, m->gather_size);
 			m->state = R_FRAME_NEXT;
 			return MPEG1READ_DATA;

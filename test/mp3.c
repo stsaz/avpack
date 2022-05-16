@@ -192,6 +192,7 @@ void test_mpeg_seek(ffstr data, ffuint delta, int partial)
 	mpeg1read_open(&m, data.len);
 	ffuint seek = 0;
 	ffuint off = 0;
+	ffuint reqs = 0, fileseek = 0;
 	const struct mpeg1read_info *info;
 
 	for (;;) {
@@ -207,11 +208,15 @@ void test_mpeg_seek(ffstr data, ffuint delta, int partial)
 			seek += delta;
 			if (seek > info->total_samples)
 				goto end;
+			reqs++;
 			mpeg1read_seek(&m, seek);
 			xlog("mpegread: seeking to: %u", seek);
 			break;
 		case MPEG1READ_SEEK:
+			fileseek++;
 			off = mpeg1read_offset(&m);
+			if (off > data.len)
+				goto end;
 			// fallthrough
 		case MPEG1READ_MORE:
 			ffstr_setstr(&in, &data);
@@ -219,6 +224,8 @@ void test_mpeg_seek(ffstr data, ffuint delta, int partial)
 			if (partial)
 				ffstr_set(&in, data.ptr + off, ffmin(partial, data.len - off));
 			off += in.len;
+			if (in.len == 0)
+				goto end;
 			break;
 
 		case MP3READ_DONE:
@@ -231,6 +238,8 @@ void test_mpeg_seek(ffstr data, ffuint delta, int partial)
 	}
 
 end:
+	xlog("mpegread: seek-reqs:%u  avg-file-seek-reqs:%u"
+		, reqs, fileseek/reqs);
 	mpeg1read_close(&m);
 }
 
