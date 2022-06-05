@@ -8,6 +8,7 @@ caf_pakt_read
 caf_desc_read
 caf_varint
 mp4_esds_read
+kuki_alac_read
 */
 
 /* .caf format:
@@ -261,6 +262,24 @@ static inline int mp4_esds_read(const char *data, ffuint len, struct mp4_acodec 
 	}
 
 	return r;
+}
+
+/*
+len[4] // =12
+[8] "frmaalac"
+
+len[4] // =36
+[4] "alac"
+unused[4]
+
+conf[24]
+*/
+static inline int kuki_alac_read(ffstr in, ffstr *out)
+{
+	if (12+12+24 > in.len || !!ffmem_cmp(in.ptr+4, "frmaalac", 8))
+		return -1;
+	ffstr_set(out, in.ptr + 12+12, 24);
+	return 0;
 }
 
 

@@ -232,13 +232,24 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 			return CAFREAD_TAG;
 
 		case R_CHUNK + CAF_T_KUKI: {
-			struct mp4_acodec ac;
-			if (0 != mp4_esds_read(c->chunk.ptr, c->chunk.len, &ac))
-				return _CAFR_ERR(c, "bad esds data");
-
-			c->info.bitrate = ac.avg_brate;
 			ffstr_free(&c->info.codec_conf);
-			ffstr_dup(&c->info.codec_conf, ac.conf, ac.conflen);
+			switch (c->info.codec) {
+			case CAF_AAC: {
+				struct mp4_acodec ac;
+				if (0 != mp4_esds_read(c->chunk.ptr, c->chunk.len, &ac))
+					return _CAFR_ERR(c, "bad esds data");
+				c->info.bitrate = ac.avg_brate;
+				ffstr_dup(&c->info.codec_conf, ac.conf, ac.conflen);
+				break;
+			}
+			case CAF_ALAC: {
+				ffstr conf;
+				if (0 != kuki_alac_read(c->chunk, &conf))
+					return _CAFR_ERR(c, "bad ALAC config");
+				ffstr_dupstr(&c->info.codec_conf, &conf);
+				break;
+			}
+			}
 			_cafr_gather(c, R_CHUNK_HDR, sizeof(struct caf_chunk));
 			break;
 		}
