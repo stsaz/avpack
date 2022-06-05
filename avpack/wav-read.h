@@ -42,6 +42,7 @@ typedef struct wavread {
 
 	struct wav_info info;
 	ffuint sampsize;
+	ffuint samples;
 
 	ffuint64 datasize
 		, dataoff
@@ -330,7 +331,7 @@ static inline int wavread_process(wavread *w, ffstr *input, ffstr *output)
 			continue;
 
 		case R_DATAOK:
-			w->cursample += input->len / w->sampsize;
+			w->cursample += w->samples;
 			w->state = R_DATA;
 			// fallthrough
 
@@ -360,12 +361,14 @@ static inline int wavread_process(wavread *w, ffstr *input, ffstr *output)
 			ffstr_set(output, (void*)input->ptr, n);
 			ffstr_shift(input, n);
 			w->off += n;
+			w->samples = n / w->sampsize;
 			w->state = R_DATAOK;
 			return WAVREAD_DATA;
 		}
 
 		case R_BUFDATA:
 			*output = w->gbuf;
+			w->samples = 1;
 			w->state = R_DATAOK;
 			return WAVREAD_DATA;
 
