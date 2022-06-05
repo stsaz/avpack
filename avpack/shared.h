@@ -97,6 +97,12 @@ static inline void _avp_stream_reset(struct avp_stream *s)
 	s->r = s->w = 0;
 }
 
+static inline ffuint _avp_stream_used(struct avp_stream *s)
+{
+	ffuint used = s->w - s->r;
+	return used;
+}
+
 static inline ffstr _avp_stream_view(struct avp_stream *s)
 {
 	ffuint used = s->w - s->r;

@@ -168,7 +168,7 @@ end:
 	mkvread_close(&m);
 }
 
-void test_mkv_seek(ffstr data, ffuint delta, int partial)
+void test_mkv_seek(ffstr data, ffuint delta_msec, int partial)
 {
 	int r;
 	ffstr in = {}, out;
@@ -195,10 +195,12 @@ void test_mkv_seek(ffstr data, ffuint delta, int partial)
 				}
 			}
 			break;
+		case MKVREAD_TAG:
+			break;
 		case MKVREAD_DATA:
-			x(mkvread_curpos(&m) <= seek);
+			x(mkvread_curpos(&m) >= seek);
 
-			seek += delta * 1000;
+			seek += delta_msec;
 			if (seek > info->duration_msec)
 				goto end;
 			reqs++;
@@ -247,7 +249,7 @@ void test_mkv()
 #if 0
 	data.ptr = NULL;
 	file_readall("/tmp/1.mkv", &data);
-	test_mkv_seek(data, 71);
+	test_mkv_seek(data, 1000, 0);
 	ffstr_free(&data);
 #endif
 }

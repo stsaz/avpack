@@ -5,6 +5,7 @@
 /*
 mkv_codec
 mkv_varint mkv_varint_shift mkv_int_ntoh mkv_flt_ntoh
+mkv_read_id_size
 mkv_lacing
 mkv_vorbis_hdr
 mkv_el_find
@@ -78,26 +79,23 @@ static int mkv_codec(ffstr name)
 01xxxxxx xxxxxxxx
 001xxxxx xxxxxxxx*2
 ...
-*/
+Return N of bytes read
+ <0: need at least -N bytes
+ 0: error */
 static int mkv_varint(const void *data, ffsize len, ffuint64 *dst)
 {
-	ffuint64 n = 0;
+	if (len == 0)
+		return -1;
+
 	ffuint size;
 	const ffbyte *d = (ffbyte*)data;
-
-	if (len == 0)
+	if (0 == (size = ffbit_find32((d[0] << 24) & 0xff000000)))
 		return 0;
 
-	if (0 == (size = ffbit_find32((d[0] << 24) & 0xff000000)))
-		return -1;
+	if (dst == NULL || size > len)
+		return -(int)size;
 
-	if (dst == NULL)
-		return size;
-
-	if (size > len)
-		return -1;
-
-	n = (ffuint)d[0];
+	ffuint64 n = (ffuint)d[0];
 	if (len != (ffsize)-1)
 		n = n & ~(0x80 >> (size - 1));
 
@@ -112,7 +110,7 @@ static int mkv_varint(const void *data, ffsize len, ffuint64 *dst)
 static int mkv_varint_shift(ffstr *data, ffuint64 *dst)
 {
 	int r;
-	if (-1 == (r = mkv_varint(data->ptr, data->len, dst)))
+	if (0 >= (r = mkv_varint(data->ptr, data->len, dst)))
 		return -1;
 	ffstr_shift(data, r);
 	return r;
@@ -169,6 +167,32 @@ static int mkv_flt_ntoh(double *dst, const char *d, ffsize len)
 		return -1;
 	}
 	return 0;
+}
+
+/** Read element ID and size
+Return N of bytes read
+ <0: need at least -N bytes
+  0: error */
+static inline int mkv_read_id_size(ffstr d, ffuint *id, ffuint64 *size)
+{
+	int r, r2;
+	r = mkv_varint(d.ptr, d.len, NULL);
+	if (r == 0)
+		return 0;
+	r = -r;
+	if ((ffuint)r > d.len)
+		return -r;
+
+	r2 = mkv_varint(d.ptr + r, d.len - r, size);
+	if (r2 == 0)
+		return 0;
+	else if (r2 < 0)
+		return -((int)d.len + -r2);
+
+	ffuint64 id64;
+	mkv_int_ntoh(&id64, d.ptr, r);
+	*id = id64;
+	return r + r2;
 }
 
 /** Read EBML lacing.
