@@ -210,9 +210,12 @@ static int _aviread_chunk(aviread *a)
 		if (0 != avi_strf_read(a->curtrack, a->gbuf.ptr, a->gbuf.len))
 			break;
 
-		if (a->curtrack->codec_conf.len != 0)
-			if (NULL == ffstr_dup(&a->curtrack->codec_conf, a->curtrack->codec_conf.ptr, a->curtrack->codec_conf.len))
+		if (a->curtrack->codec_conf.len != 0) {
+			ffstr cc = a->curtrack->codec_conf;
+			ffstr_null(&a->curtrack->codec_conf);
+			if (NULL == ffstr_dupstr(&a->curtrack->codec_conf, &cc))
 				return _AVIR_ERR(a, AVI_EMEM);
+		}
 		break;
 
 	case AVI_T_INFO:

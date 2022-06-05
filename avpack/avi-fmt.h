@@ -110,6 +110,7 @@ static int avi_strf_read(struct avi_audio_info *ai, const char *data, ffsize len
 	ffuint exsize = ffint_le_cpu16_ptr(f->exsize);
 	if (exsize > len)
 		return -1;
+	data += sizeof(struct avi_strf_audio) + 2;
 
 	switch (ai->codec) {
 
@@ -117,14 +118,14 @@ static int avi_strf_read(struct avi_audio_info *ai, const char *data, ffsize len
 		if (exsize < sizeof(struct avi_strf_mp3))
 			break;
 
-		const struct avi_strf_mp3 *mp3 = (struct avi_strf_mp3*)(f + 1);
+		const struct avi_strf_mp3 *mp3 = (struct avi_strf_mp3*)data;
 		ai->delay = ffint_le_cpu16_ptr(mp3->delay);
 		ai->blocksize = ffint_le_cpu16_ptr(mp3->blocksize);
 		break;
 	}
 
 	case AVI_A_AAC:
-		ffstr_set(&ai->codec_conf, (void*)(f + 1), exsize);
+		ffstr_set(&ai->codec_conf, data, exsize);
 		break;
 	}
 
