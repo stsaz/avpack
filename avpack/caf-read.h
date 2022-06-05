@@ -23,7 +23,7 @@ cafread_tag
 #include <avpack/shared.h>
 #include <ffbase/vector.h>
 
-typedef void (*caf_log_t)(void *udata, ffstr msg);
+typedef void (*caf_log_t)(void *udata, const char *fmt, va_list va);
 
 typedef struct cafread {
 	ffuint state, nxstate;
@@ -100,15 +100,10 @@ static inline void _cafread_log(cafread *c, const char *fmt, ...)
 	if (c->log == NULL)
 		return;
 
-	ffstr s = {};
-	ffsize cap = 0;
 	va_list va;
 	va_start(va, fmt);
-	ffstr_growfmtv(&s, &cap, fmt, va);
+	c->log(c->udata, fmt, va);
 	va_end(va);
-
-	c->log(c->udata, s);
-	ffstr_free(&s);
 }
 
 #define _CAFR_ERR(c, e) \

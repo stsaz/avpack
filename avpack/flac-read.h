@@ -26,7 +26,7 @@ fLaC (HDR STREAMINFO) [HDR BLOCK]... (FRAME_HDR SUBFRAME... FRAME_FOOTER)...
 #include <avpack/shared.h>
 #include <ffbase/vector.h>
 
-typedef void (*flac_log_t)(void *udata, ffstr msg);
+typedef void (*flac_log_t)(void *udata, const char *fmt, va_list va);
 
 typedef struct flacread {
 	ffuint state, nextstate;
@@ -97,15 +97,10 @@ static inline void _flacr_log(flacread *f, const char *fmt, ...)
 	if (f->log == NULL)
 		return;
 
-	ffstr s = {};
-	ffsize cap = 0;
 	va_list va;
 	va_start(va, fmt);
-	ffstr_growfmtv(&s, &cap, fmt, va);
+	f->log(f->udata, fmt, va);
 	va_end(va);
-
-	f->log(f->udata, s);
-	ffstr_free(&s);
 }
 
 /** Find FLAC header */

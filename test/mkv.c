@@ -60,10 +60,10 @@ const ffbyte mkv_sample[] = {
 };
 
 
-static void mkvr_log(void *udata, ffstr msg)
+static void mkvr_log(void *udata, const char *fmt, va_list va)
 {
 	(void)udata;
-	xlog("%S", &msg);
+	xlogv(fmt, va);
 }
 
 void test_mkv_read(ffstr data, int partial)

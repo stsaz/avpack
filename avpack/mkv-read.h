@@ -29,7 +29,7 @@ struct mkv_el {
 	const struct mkv_binel *ctx;
 };
 
-typedef void (*mkv_log_t)(void *udata, ffstr msg);
+typedef void (*mkv_log_t)(void *udata, const char *fmt, va_list va);
 
 struct mkvread_audio_info {
 	int type; // enum MKV_TRKTYPE
@@ -139,15 +139,10 @@ static inline void _mkvread_log(mkvread *m, const char *fmt, ...)
 	if (m->log == NULL)
 		return;
 
-	ffstr s = {};
-	ffsize cap = 0;
 	va_list va;
 	va_start(va, fmt);
-	ffstr_growfmtv(&s, &cap, fmt, va);
+	m->log(m->udata, fmt, va);
 	va_end(va);
-
-	m->log(m->udata, s);
-	ffstr_free(&s);
 }
 
 static inline const char* mkvread_error(mkvread *m)

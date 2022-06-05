@@ -71,10 +71,10 @@ end:
 	return v;
 }
 
-static void mp4r_log(void *udata, ffstr msg)
+static void mp4r_log(void *udata, const char *fmt, va_list va)
 {
 	(void)udata;
-	xlog("%S", &msg);
+	xlogv(fmt, va);
 }
 
 void test_mp4_read(ffstr data, int partial)

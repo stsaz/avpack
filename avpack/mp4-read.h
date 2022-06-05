@@ -34,7 +34,7 @@ struct mp4_box {
 	const struct mp4_bbox *ctx; // non-NULL if the box may have children
 };
 
-typedef void (*mp4_log_t)(void *udata, ffstr msg);
+typedef void (*mp4_log_t)(void *udata, const char *fmt, va_list va);
 
 struct mp4read_audio_info {
 	ffuint type; // 0:video  1:audio
@@ -108,15 +108,10 @@ static inline void _mp4read_log(mp4read *m, const char *fmt, ...)
 	if (m->log == NULL)
 		return;
 
-	ffstr s = {};
-	ffsize cap = 0;
 	va_list va;
 	va_start(va, fmt);
-	ffstr_growfmtv(&s, &cap, fmt, va);
+	m->log(m->udata, fmt, va);
 	va_end(va);
-
-	m->log(m->udata, s);
-	ffstr_free(&s);
 }
 
 enum MP4_CODEC {

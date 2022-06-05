@@ -30,10 +30,10 @@ const ffbyte caf_sample[] = {
 "\x00\x00\x00"
 };
 
-static void cafr_log(void *udata, ffstr msg)
+static void cafr_log(void *udata, const char *fmt, va_list va)
 {
 	(void)udata;
-	xlog("%S", &msg);
+	xlogv(fmt, va);
 }
 
 void test_caf_read(ffstr data, int partial)
