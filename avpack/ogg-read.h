@@ -169,7 +169,7 @@ static int _oggread_page(oggread *o, ffstr page)
 	if (page_endpos != (ffuint64)-1)
 		o->page_endpos = page_endpos;
 
-	_oggread_log(o, "page #%u/%xu  end-pos:%xU  packets:%u  continued:%u  size:%u  offset:%xU"
+	_oggread_log(o, "page #%u/%xu  end-pos:%U  packets:%u  continued:%u  size:%u  offset:%xU"
 		, o->page_num, ffint_le_cpu32_ptr(h->serial), page_endpos
 		, ogg_pkt_num(h), !!(h->flags & OGG_FCONTINUED)
 		, page.len, o->off - page.len);
@@ -234,7 +234,7 @@ static int _oggread_seek_hdr(oggread *o, ffstr *input)
 	const struct ogg_hdr *h;
 	int r = _oggread_hdr_find(o, &h, input);
 	if (r != 0) {
-		_oggread_log(o, "seek: page#%u  endpos:%xU"
+		_oggread_log(o, "seek: page#%u  endpos:%U"
 			, ffint_le_cpu32_ptr(h->number), ffint_le_cpu64_ptr(h->granulepos));
 	}
 
@@ -301,19 +301,23 @@ static int _oggread_pkt(oggread *o, ffstr *output)
 	if (r == -1) {
 		return 0xfeed;
 	}
-	if (o->page_continued && !o->pkt_incomplete) {
+
+	_oggread_log(o, " packet #%u.%u  size:%u  %s"
+		, o->page_num, o->pkt_num, (int)out.len
+		, (r == -2) ? "incomplete" : "");
+
+	if (o->page_continued) {
 		o->page_continued = 0;
-		_oggread_log(o, "unexpected continued packet");
-		return 0xca11;
-	}
-	if (o->pkt_incomplete && !o->page_continued) {
+		if (!o->pkt_incomplete) {
+			_oggread_log(o, "unexpected continued page; skip the packet");
+			o->pkt_num++;
+			return 0xca11;
+		}
+	} else if (o->pkt_incomplete) {
+		_oggread_log(o, "expected continued page; clear previous packet data");
 		o->pkt_incomplete = 0;
 		o->pkt_data.len = 0;
-		_oggread_log(o, "expected continued packet");
 	}
-
-	_oggread_log(o, "packet #%u.%u  size:%u"
-		, o->page_num, o->pkt_num, (int)out.len);
 
 	if (r == -2 || o->pkt_incomplete) {
 		if (out.len != ffvec_add2T(&o->pkt_data, &out, char))
@@ -419,7 +423,7 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 			ffuint64 gpos = ffint_le_cpu64_ptr(h->granulepos);
 			if (gpos != (ffuint64)-1)
 				o->info.total_samples = gpos;
-			_oggread_log(o, "page#%u  endpos:%xU"
+			_oggread_log(o, "page#%u  endpos:%U"
 				, ffint_le_cpu32_ptr(h->number), gpos);
 			o->chunk_processed = 1;
 			continue;
