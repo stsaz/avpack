@@ -20,6 +20,7 @@ cafread_tag
 #pragma once
 
 #include <avpack/caf-fmt.h>
+#include <avpack/shared.h>
 #include <ffbase/vector.h>
 
 typedef void (*caf_log_t)(void *udata, ffstr msg);
@@ -28,9 +29,10 @@ typedef struct cafread {
 	ffuint state, nxstate;
 	ffsize gathlen;
 	ffstr chunk;
-	ffvec buf;
+	struct avp_stream stream;
 	const char *error;
 
+	ffuint nframes; // N of current frames
 	ffuint64 inoff; // input offset
 	ffuint64 chunk_size; // current chunk size
 	ffuint64 ipkt; // current packet
@@ -62,7 +64,7 @@ enum CAFREAD_R {
 
 static inline ffuint64 cafread_cursample(cafread *c)
 {
-	return c->iframe - c->info.packet_frames;
+	return c->iframe - c->nframes;
 }
 
 static inline const caf_info* cafread_info(cafread *c)
@@ -82,13 +84,13 @@ static inline ffstr cafread_tag(cafread *c, ffstr *val)
 
 static inline int cafread_open(cafread *c)
 {
-	ffvec_alloc(&c->buf, 1024, 1);
+	_avp_stream_realloc(&c->stream, 4*1024);
 	return 0;
 }
 
 static inline void cafread_close(cafread *c)
 {
-	ffvec_free(&c->buf);
+	_avp_stream_free(&c->stream);
 	ffstr_free(&c->info.codec_conf);
 	ffstr_free(&c->pakt);
 }
@@ -168,14 +170,14 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 			// fallthrough
 
 		case R_GATHER:
-			r = ffstr_gather((ffstr*)&c->buf, &c->buf.cap, input->ptr, input->len, c->gathlen, &c->chunk);
-			if (r < 0)
+			if (0 != _avp_stream_realloc(&c->stream, c->gathlen))
 				return _CAFR_ERR(c, "not enough memory");
+			r = _avp_stream_gather(&c->stream, *input, c->gathlen, &c->chunk);
 			ffstr_shift(input, r);
 			c->inoff += r;
-			if (c->chunk.len == 0)
+			if (c->chunk.len < c->gathlen)
 				return CAFREAD_MORE;
-			c->buf.len = 0;
+			_avp_stream_consume(&c->stream, c->gathlen);
 			c->state = c->nxstate;
 			break;
 
@@ -188,8 +190,9 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 		case R_CHUNK_HDR: {
 			const struct caf_chunk *cc = (struct caf_chunk*)c->chunk.ptr;
 			c->chunk_size = ffint_be_cpu64_ptr(cc->size);
-			_cafread_log(c, "type:%*s  size:%D  off:%U"
-				, (ffsize)4, cc->type, c->chunk_size, c->inoff);
+			ffuint64 chunk_off = c->inoff - _avp_stream_used(&c->stream) - sizeof(struct caf_chunk);
+			_cafread_log(c, "type:%*s  size:%D  off:%xU"
+				, (ffsize)4, cc->type, c->chunk_size, chunk_off);
 
 			const struct caf_binchunk *ch = NULL;
 			if (CAFREAD_DONE != (r = _cafr_chunk_find(c, cc, &ch)))
@@ -204,7 +207,8 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 
 			} else {
 				_cafr_gather(c, R_CHUNK_HDR, sizeof(struct caf_chunk));
-				c->inoff += c->chunk_size;
+				_avp_stream_reset(&c->stream);
+				c->inoff = chunk_off + sizeof(struct caf_chunk) + c->chunk_size;
 				return CAFREAD_SEEK;
 			}
 			break;
@@ -216,7 +220,7 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 			break;
 
 		case R_CHUNK + CAF_T_INFO:
-			// const struct caf_info *i = (void*)c->chunk.ptr;
+			c->chunk.len = c->chunk_size;
 			ffstr_shift(&c->chunk, sizeof(struct _caf_info));
 			c->state = R_TAG;
 			// fallthrough
@@ -232,6 +236,7 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 			return CAFREAD_TAG;
 
 		case R_CHUNK + CAF_T_KUKI: {
+			c->chunk.len = c->chunk_size;
 			ffstr_free(&c->info.codec_conf);
 			switch (c->info.codec) {
 			case CAF_AAC: {
@@ -255,6 +260,7 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 		}
 
 		case R_CHUNK + CAF_T_PAKT:
+			c->chunk.len = c->chunk_size;
 			r = caf_pakt_read(&c->info, c->chunk.ptr);
 			ffstr_shift(&c->chunk, r);
 			ffstr_free(&c->pakt);
@@ -277,7 +283,9 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 			if (input->len == 0 && (ffint64)c->chunk_size == -1)
 				return CAFREAD_MORE_OR_DONE;
 
+			ffuint64 pkt_off = c->inoff - _avp_stream_used(&c->stream);
 			ffuint sz = c->info.packet_bytes;
+			c->nframes = c->info.packet_frames;
 			if (sz == 0) {
 				r = caf_varint(c->pakt.ptr + c->pakt_off, c->pakt.len - c->pakt_off, &sz);
 				if (r == 0)
@@ -285,10 +293,16 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 				if (r < 0)
 					return _CAFR_ERR(c, "bad audio chunk");
 				c->pakt_off += r;
+			} else if (c->info.codec == CAF_LPCM) {
+				ffuint n = ffmin(_avp_stream_used(&c->stream), c->chunk_size) / sz; // take as many samples as we can
+				if (n != 0) {
+					c->nframes = n;
+					sz = c->nframes * sz;
+				}
 			}
 
 			_cafread_log(c, "pkt#%U  size:%u  off:%U"
-				, c->ipkt, sz, c->inoff);
+				, c->ipkt, sz, pkt_off);
 
 			if (sz > c->chunk_size)
 				return _CAFR_ERR(c, "bad audio chunk");
@@ -303,8 +317,8 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 		}
 
 		case R_DATA_CHUNK:
-			*output = c->chunk;
-			c->iframe += c->info.packet_frames;
+			ffstr_set(output, c->chunk.ptr, c->gathlen);
+			c->iframe += c->nframes;
 			c->state = R_DATA_NEXT;
 			return CAFREAD_DATA;
 
