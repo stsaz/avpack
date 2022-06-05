@@ -237,10 +237,15 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 					|| m->seek_sample >= m->info.total_samples)
 					return _MPEG1R_ERR(m, "can't seek");
 
+				ffuint64 off;
 				if (m->vbr_toc[98] != 0)
-					m->off = m->frame1_off + mpeg1_xing_seek(m->vbr_toc, m->seek_sample, m->info.total_samples, m->total_size);
+					off = mpeg1_xing_seek(m->vbr_toc, m->seek_sample, m->info.total_samples, m->total_size);
 				else
-					m->off = m->frame1_off + m->seek_sample * m->total_size / m->info.total_samples;
+					off = m->seek_sample * m->total_size / m->info.total_samples;
+				off -= mpeg1_size(m->prev_hdr);
+				if ((ffint64)off < 0)
+					off = 0;
+				m->off = m->frame1_off + off;
 				m->cur_sample = m->seek_sample;
 				m->seek_sample = (ffuint64)-1;
 				_avp_stream_reset(&m->stream);
