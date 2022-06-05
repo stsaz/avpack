@@ -239,6 +239,11 @@ static int _aviread_chunk(aviread *a)
 			return 0;
 		}
 
+		struct avi_audio_info *ai = a->curtrack;
+		if (ai->codec == AVI_A_PCM) {
+			ai->blocksize = chunk->size / (ai->bits/8 * ai->channels);
+		}
+
 		a->gather_size = chunk->size;
 		chunk->size = 0;
 		return 0xdada;
