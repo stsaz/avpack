@@ -92,8 +92,10 @@ static inline int oggwrite_process(oggwrite *o, ffstr *input, ffstr *output, ffu
 		return OGGWRITE_DONE;
 
 	if (input->len == 0) {
-		if (flags & OGGWRITE_FLAST)
+		if (flags & OGGWRITE_FLAST) {
+			o->page_endpos = endpos;
 			goto fin;
+		}
 		return OGGWRITE_MORE;
 	}
 
