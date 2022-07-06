@@ -26,7 +26,7 @@ struct wav_chunk {
 	const struct wav_bchunk *ctx;
 };
 
-typedef void (*wav_log_t)(void *udata, ffstr msg);
+typedef void (*wav_log_t)(void *udata, const char *fmt, va_list va);
 
 typedef struct wavread {
 	ffuint state;
@@ -66,15 +66,10 @@ static inline void _wavread_log(wavread *w, const char *fmt, ...)
 	if (w->log == NULL)
 		return;
 
-	ffstr s = {};
-	ffsize cap = 0;
 	va_list va;
 	va_start(va, fmt);
-	ffstr_growfmtv(&s, &cap, fmt, va);
+	w->log(w->udata, fmt, va);
 	va_end(va);
-
-	w->log(w->udata, s);
-	ffstr_free(&s);
 }
 
 /** Find chunk within the specified context */

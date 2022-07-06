@@ -33,7 +33,7 @@ struct wv_seekpoint {
 	ffuint64 off;
 };
 
-typedef void (*wv_log_t)(void *udata, ffstr msg);
+typedef void (*wv_log_t)(void *udata, const char *fmt, va_list va);
 
 typedef struct wvread {
 	ffuint state;
@@ -107,15 +107,10 @@ static inline void _wvr_log(wvread *w, const char *fmt, ...)
 	if (w->log == NULL)
 		return;
 
-	ffstr s = {};
-	ffsize cap = 0;
 	va_list va;
 	va_start(va, fmt);
-	ffstr_growfmtv(&s, &cap, fmt, va);
+	w->log(w->udata, fmt, va);
 	va_end(va);
-
-	w->log(w->udata, s);
-	ffstr_free(&s);
 }
 
 struct wv_hdr {

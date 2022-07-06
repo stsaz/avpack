@@ -23,10 +23,10 @@ static const ffbyte wv_sample[] = {
 	"\x00\x00\x00\x00\x00"
 };
 
-static void wvr_log(void *udata, ffstr msg)
+static void wvr_log(void *udata, const char *fmt, va_list va)
 {
 	(void)udata;
-	xlog("%S", &msg);
+	xlogv(fmt, va);
 }
 
 void test_wv_read(ffstr data, int partial)

@@ -48,10 +48,10 @@ end:
 	return v;
 }
 
-static void oggr_log(void *udata, ffstr msg)
+static void oggr_log(void *udata, const char *fmt, va_list va)
 {
 	(void)udata;
-	xlog("%S", &msg);
+	xlogv(fmt, va);
 }
 
 void test_ogg_read(ffstr data, int partial)

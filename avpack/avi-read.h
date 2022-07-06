@@ -24,7 +24,7 @@ struct aviread_seekpt {
 	ffuint off;
 };
 
-typedef void (*avi_log_t)(void *udata, ffstr msg);
+typedef void (*avi_log_t)(void *udata, const char *fmt, va_list va);
 
 struct aviread_chunk {
 	ffuint id;
@@ -145,15 +145,10 @@ static inline void _aviread_log(aviread *a, const char *fmt, ...)
 	if (a->log == NULL)
 		return;
 
-	ffstr s = {};
-	ffsize cap = 0;
 	va_list va;
 	va_start(va, fmt);
-	ffstr_growfmtv(&s, &cap, fmt, va);
+	a->log(a->udata, fmt, va);
 	va_end(va);
-
-	a->log(a->udata, s);
-	ffstr_free(&s);
 }
 
 static void _aviread_chunkinfo(aviread *a, const void *data, const struct avi_binchunk *ctx, struct aviread_chunk *chunk, ffuint64 off)

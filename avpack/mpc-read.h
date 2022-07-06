@@ -32,7 +32,7 @@ enum MPCREAD_O {
 	MPCREAD_O_NOTAGS = 1,
 };
 
-typedef void (*mpc_log_t)(void *udata, ffstr msg);
+typedef void (*mpc_log_t)(void *udata, const char *fmt, va_list va);
 
 struct mpcread_info {
 	ffuint sample_rate;
@@ -269,15 +269,10 @@ static inline void _mpcr_log(mpcread *m, const char *fmt, ...)
 	if (m->log == NULL)
 		return;
 
-	ffstr s = {};
-	ffsize cap = 0;
 	va_list va;
 	va_start(va, fmt);
-	ffstr_growfmtv(&s, &cap, fmt, va);
+	m->log(m->udata, fmt, va);
 	va_end(va);
-
-	m->log(m->udata, s);
-	ffstr_free(&s);
 }
 
 /**

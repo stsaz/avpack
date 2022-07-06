@@ -377,10 +377,10 @@ const ffbyte avi_sample[] = {
 "\x00\x00\x04\x00\x00\x00\xb0\x00\x00\x00"
 };
 
-static void avir_log(void *udata, ffstr msg)
+static void avir_log(void *udata, const char *fmt, va_list va)
 {
 	(void)udata;
-	xlog("%S", &msg);
+	xlogv(fmt, va);
 }
 
 void test_avi_read(ffstr data, int partial)

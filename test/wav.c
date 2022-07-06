@@ -54,10 +54,10 @@ end:
 	return v;
 }
 
-static void wavr_log(void *udata, ffstr msg)
+static void wavr_log(void *udata, const char *fmt, va_list va)
 {
 	(void)udata;
-	xlog("%S", &msg);
+	xlogv(fmt, va);
 }
 
 void test_wav_read(ffstr data, int partial)

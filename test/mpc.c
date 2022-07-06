@@ -31,10 +31,10 @@ static const ffbyte apetag[] = {
 "\x00\x00\x00\x00\x00\x80\x00\x00\x00\x00\x00\x00\x00\x00"
 };
 
-static void mpcr_log(void *udata, ffstr msg)
+static void mpcr_log(void *udata, const char *fmt, va_list va)
 {
 	(void)udata;
-	xlog("%S", &msg);
+	xlogv(fmt, va);
 }
 
 void test_mpc_read(ffstr data, int partial)

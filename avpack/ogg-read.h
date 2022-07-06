@@ -19,7 +19,7 @@ oggread_error
 #include <avpack/shared.h>
 #include <ffbase/vector.h>
 
-typedef void (*ogg_log_t)(void *udata, ffstr msg);
+typedef void (*ogg_log_t)(void *udata, const char *fmt, va_list va);
 
 struct _oggread_seekpoint {
 	ffuint64 sample;
@@ -89,15 +89,10 @@ static inline void _oggread_log(oggread *o, const char *fmt, ...)
 	if (o->log == NULL)
 		return;
 
-	ffstr s = {};
-	ffsize cap = 0;
 	va_list va;
 	va_start(va, fmt);
-	ffstr_growfmtv(&s, &cap, fmt, va);
+	o->log(o->udata, fmt, va);
 	va_end(va);
-
-	o->log(o->udata, s);
-	ffstr_free(&s);
 }
 
 static inline void oggread_close(oggread *o)

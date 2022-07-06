@@ -102,10 +102,10 @@ end:
 	return v;
 }
 
-// static void mpegr_log(void *udata, ffstr msg)
+// static void mpegr_log(void *udata, const char *fmt, va_list va)
 // {
 // 	(void)udata;
-// 	xlog("%S", &msg);
+// 	xlogv(fmt, va);
 // }
 
 void test_mp3_read(ffstr data, int partial)
