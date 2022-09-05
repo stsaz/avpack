@@ -291,11 +291,15 @@ void test_flac_seek(ffstr data, ffuint delta_msec, int partial)
 			flacread_seek(&f, seek);
 			xlog("flacread: seeking to: %u", seek);
 			break;
+
 		case FLACREAD_SEEK:
 			fileseek++;
 			off = flacread_offset(&f);
 			// fallthrough
+
 		case FLACREAD_MORE:
+			if (off == data.len)
+				goto end;
 			ffstr_setstr(&in, &data);
 			ffstr_shift(&in, off);
 			if (partial)

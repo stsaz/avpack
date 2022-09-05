@@ -273,9 +273,10 @@ static inline int _mp4_box_parse(mp4read *m, struct mp4_box *parent, struct mp4_
 		box->ctx = b->ctx;
 	}
 
+	ffuint64 box_off = m->off - data->len;
 	_mp4read_log(m, "%*c%4s  size:%U  offset:%xU"
 		, (ffsize)m->ictx, ' '
-		, b->type, box->osize, m->off - data->len);
+		, b->type, box->osize, box_off);
 
 	if (box->osize < box_szof)
 		return MP4READ_ESMALL;
@@ -731,8 +732,9 @@ static inline int mp4read_process(mp4read *m, ffstr *input, ffstr *output)
 			m->state = R_DATAOK;
 
 			const struct mp4_seekpt *pts = m->curtrack->sktab.ptr;
+			ffuint64 fr_off = m->off - m->frsize;
 			_mp4read_log(m, "fr#%u  size:%u  data-chunk:%u  audio-pos:%U  off:%U"
-				, m->curtrack->isamp - 1, m->frsize, pts[m->curtrack->isamp - 1].chunk_id, m->cursample, m->off - m->frsize);
+				, m->curtrack->isamp - 1, m->frsize, pts[m->curtrack->isamp - 1].chunk_id, m->cursample, fr_off);
 
 			return MP4READ_DATA;
 		}
