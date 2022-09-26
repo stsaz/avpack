@@ -71,6 +71,7 @@ void test_aac()
 	ffstr_set(&data, aac_sample, sizeof(aac_sample)-1);
 
 #if 0
+	ffstr_null(&data);
 	x(0 == file_readall("/tmp/1.aac", &data));
 #endif
 

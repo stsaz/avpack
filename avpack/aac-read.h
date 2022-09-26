@@ -19,8 +19,6 @@ aacadts_find
 */
 
 #pragma once
-
-#include <ffbase/vector.h>
 #include <avpack/shared.h>
 
 
@@ -49,7 +47,7 @@ typedef struct aacread {
 	const char *error;
 	ffuint64 off;
 	ffuint frlen;
-	ffvec buf;
+	struct avp_stream stream;
 	ffstr chunk;
 	char asc[2];
 	ffbyte first_hdr[7];
@@ -65,12 +63,12 @@ static inline const char* aacread_error(aacread *a)
 
 static inline void aacread_open(aacread *a)
 {
-	(void)a;
+	_avp_stream_realloc(&a->stream, 4096);
 }
 
 static inline void aacread_close(aacread *a)
 {
-	ffvec_free(&a->buf);
+	_avp_stream_free(&a->stream);
 }
 
 static ffuint64 _aacadts_bit_read64(ffuint64 val, ffuint *off, ffuint n)
@@ -212,27 +210,22 @@ static int _aacread_hdr_find(aacread *a, ffstr *input, ffstr *out)
 
 	for (;;) {
 
-		r = _avpack_gather_header(&a->buf, *input, 7, &chunk);
+		r = _avp_stream_gather(&a->stream, *input, 7, &chunk);
 		ffstr_shift(input, r);
 		a->off += r;
-		if (chunk.len == 0)
+		if (chunk.len < 7)
 			return 0xfeed;
 
 		pos = aacadts_find(chunk, &h);
 		if (pos >= 0)
 			break;
 
-		r = _avpack_gather_trailer(&a->buf, *input, 7, r);
-		// r<0: ffstr_shift() isn't suitable due to assert()
-		input->ptr += r,  input->len -= r;
-		a->off += r;
+		_avp_stream_consume(&a->stream, chunk.len - (7-1));
 	}
 
-	if (chunk.ptr == input->ptr) {
-		ffstr_shift(input, 7 + pos);
-		a->off += 7 + pos;
-	}
-	ffstr_set(out, &chunk.ptr[pos], 7);
+	_avp_stream_consume(&a->stream, pos);
+	ffstr_shift(&chunk, pos);
+	*out = chunk;
 	a->frlen = h.framelen;
 	return 0;
 }
@@ -242,30 +235,20 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 {
 	enum {
 		R_HDR_FIND, R_HDR2, R_HDR, R_CRC, R_DATA, R_FR,
-		R_GATHER_MORE, R_GATHER,
+		R_GATHER,
 	};
 	int r;
 	struct aacadts_hdr h;
 
 	for (;;) {
 		switch (a->state) {
-
-		case R_GATHER_MORE:
-			if (a->buf.len == 0) {
-				FF_ASSERT(&a->chunk.ptr[a->chunk.len] == input->ptr);
-				input->ptr -= a->chunk.len,  input->len += a->chunk.len;
-				a->off -= a->chunk.len;
-			}
-			a->state = R_GATHER;
-			// fallthrough
 		case R_GATHER:
-			r = ffstr_gather((ffstr*)&a->buf, &a->buf.cap, input->ptr, input->len, a->gather_size, &a->chunk);
-			if (r < 0)
-				return a->error = "not enough memory",  AACREAD_ERROR;
+			r = _avp_stream_gather(&a->stream, *input, a->gather_size, &a->chunk);
 			ffstr_shift(input, r);
 			a->off += r;
-			if (a->chunk.len == 0)
+			if (a->chunk.len < a->gather_size)
 				return AACREAD_MORE;
+			a->chunk.len = a->gather_size;
 			a->state = a->nextstate;
 			continue;
 
@@ -274,24 +257,14 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 			if (r == 0xfeed)
 				return AACREAD_MORE;
 
-			if (a->buf.len != 0)
-				ffstr_erase_left((ffstr*)&a->buf, a->chunk.ptr - (char*)a->buf.ptr);
-			a->state = R_GATHER_MORE,  a->nextstate = R_HDR2,  a->gather_size = a->frlen + 7;
+			a->state = R_GATHER,  a->nextstate = R_HDR2,  a->gather_size = a->frlen + 7;
 			continue;
 
 		case R_HDR2: {
 			const void *h2 = &a->chunk.ptr[a->frlen];
 			if (!(0 == aacadts_parse(&h, h2)
 				&& aacadts_match(a->chunk.ptr, h2))) {
-
-				if (a->buf.len != 0) {
-					ffstr_erase_left((ffstr*)&a->buf, 1);
-				} else if (&a->chunk.ptr[a->chunk.len] == input->ptr) {
-					ffuint n = a->chunk.len - 1;
-					input->ptr -= n,  input->len += n;
-					a->off -= n;
-				}
-
+				_avp_stream_consume(&a->stream, 1);
 				a->state = R_HDR_FIND;
 				continue;
 			}
@@ -325,7 +298,7 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 			}
 
 			a->frlen = h.framelen;
-			a->state = R_GATHER_MORE,  a->nextstate = R_DATA,  a->gather_size = h.framelen;
+			a->state = R_GATHER,  a->nextstate = R_DATA,  a->gather_size = h.framelen;
 			if (a->options & AACREAD_WHOLEFRAME)
 				a->nextstate = R_FR;
 			else if (h.have_crc)
@@ -340,9 +313,8 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 			// fallthrough
 		case R_FR: {
 			*output = a->chunk;
+			_avp_stream_consume(&a->stream, a->gather_size);
 			ffuint st = a->state;
-			if (a->buf.len != 0)
-				ffstr_erase_left((ffstr*)&a->buf, a->frlen);
 			a->state = R_GATHER,  a->nextstate = R_HDR,  a->gather_size = 7;
 			if (st == R_FR)
 				return AACREAD_FRAME;
