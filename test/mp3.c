@@ -249,7 +249,7 @@ void test_mp3()
 	buf = test_mp3_write();
 
 	if (Verbose) {
-		ffstr s = ffmem_print(buf.ptr, buf.len, FFMEM_PRINT_ZEROSPACE);
+		ffstr s = ffmem_alprint(buf.ptr, buf.len, FFMEM_PRINT_ZEROSPACE);
 		xlog("%S", &s);
 		ffstr_free(&s);
 	}

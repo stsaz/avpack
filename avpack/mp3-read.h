@@ -29,6 +29,8 @@ MPEG_HDR ((XING LAME) | VBRI)
 #include <avpack/id3v2.h>
 #include <avpack/apetag.h>
 
+typedef void (*mp3_log_t)(void *udata, const char *fmt, va_list va);
+
 typedef struct mp3read {
 	ffuint state, nextstate;
 	ffuint gather_size;
@@ -43,7 +45,20 @@ typedef struct mp3read {
 	ffuint data_off;
 	ffuint tag; // enum MMTAG
 	ffstr tagname, tagval;
+
+	mp3_log_t log;
+	void *udata;
 } mp3read;
+
+static inline void _mp3read_log(mp3read *m, const char *fmt, ...)
+{
+	if (m->log == NULL) return;
+
+	va_list va;
+	va_start(va, fmt);
+	m->log(m->udata, fmt, va);
+	va_end(va);
+}
 
 static inline void mp3read_open(mp3read *m, ffuint64 total_size)
 {

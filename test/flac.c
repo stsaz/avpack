@@ -328,7 +328,7 @@ void test_flac()
 	buf = test_flac_write();
 
 	if (Verbose) {
-		ffstr s = ffmem_print(buf.ptr, buf.len, FFMEM_PRINT_ZEROSPACE);
+		ffstr s = ffmem_alprint(buf.ptr, buf.len, FFMEM_PRINT_ZEROSPACE);
 		xlog("%S", &s);
 		ffstr_free(&s);
 	}

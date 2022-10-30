@@ -151,7 +151,7 @@ void test_wav()
 	buf = test_wav_write();
 
 	if (Verbose) {
-		ffstr s = ffmem_print(buf.ptr, buf.len, FFMEM_PRINT_ZEROSPACE);
+		ffstr s = ffmem_alprint(buf.ptr, buf.len, FFMEM_PRINT_ZEROSPACE);
 		xlog("%S", &s);
 		ffstr_free(&s);
 	}

@@ -169,7 +169,7 @@ void test_ogg()
 	buf = test_ogg_write();
 
 	if (Verbose) {
-		ffstr s = ffmem_print(buf.ptr, buf.len, FFMEM_PRINT_ZEROSPACE);
+		ffstr s = ffmem_alprint(buf.ptr, buf.len, FFMEM_PRINT_ZEROSPACE);
 		xlog("%S", &s);
 		ffstr_free(&s);
 	}
