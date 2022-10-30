@@ -108,7 +108,8 @@ static inline int id3v1write_set(struct id3v1 *t, ffuint id, ffstr data)
 
 typedef struct id3v1read {
 	ffuint state;
-	char trkno[4];
+	char data[30*4];
+	ffuint codepage;
 } id3v1read;
 
 enum ID3V1READ_R {
@@ -186,8 +187,8 @@ static inline int id3v1read_process(struct id3v1read *rd, ffstr data, ffstr *val
 
 	case I_TRKNO:
 		if (t->track_no != 0) {
-			ffuint n = ffs_fromint(t->track_no, rd->trkno, sizeof(rd->trkno), FFS_INTZERO | FFS_INTWIDTH(2));
-			ffstr_set(val, rd->trkno, n);
+			ffuint n = ffs_fromint(t->track_no, rd->data, sizeof(rd->data), FFS_INTZERO | FFS_INTWIDTH(2));
+			ffstr_set(val, rd->data, n);
 			rd->state = I_GENRE;
 			return -MMTAG_TRACKNO;
 		}
@@ -211,7 +212,17 @@ static inline int id3v1read_process(struct id3v1read *rd, ffstr data, ffstr *val
 		if (!(s.ptr[i] == '\0' || s.ptr[i] == ' '))
 			break;
 	}
-	ffstr_set(val, s.ptr, i+1);
+	s.len = i+1;
+
+	i = ffutf8_from_utf8(rd->data, sizeof(rd->data), s.ptr, s.len, 0);
+	if (i != (ffssize)s.len) {
+		if (rd->codepage == 0)
+			rd->codepage = FFUNICODE_WIN1252;
+		i = ffutf8_from_cp(rd->data, sizeof(rd->data), s.ptr, s.len, rd->codepage);
+	}
+	if (i < 0)
+		i = 0;
+	ffstr_set(val, rd->data, i);
 
 	return -r;
 }

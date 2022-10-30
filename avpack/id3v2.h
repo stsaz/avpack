@@ -251,7 +251,11 @@ static int _id3v2read_text_decode(struct id3v2read *d, ffstr in, ffstr *out)
 	ffvec *b = &d->unsync_buf;
 	switch (d->txtenc) {
 	case ID3V2_UTF8:
-		ffstr_setstr(out, &in);
+		n = ffutf8_from_utf8(NULL, 0, in.ptr, in.len, 0);
+		if (NULL == ffvec_realloc(b, n, 1))
+			return _ID3V2READ_WARN(d, "not enough memory");
+		b->len = ffutf8_from_utf8(b->ptr, b->cap, in.ptr, in.len, 0);
+		ffstr_setstr(out, b);
 		break;
 
 	case ID3V2_ANSI:
