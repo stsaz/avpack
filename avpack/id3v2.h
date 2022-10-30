@@ -28,47 +28,42 @@ PADDING
 static const ffbyte id3v2_frame_int[] = {
 	MMTAG_PICTURE,
 	MMTAG_COMMENT,
+	MMTAG_COMMENT,
+	MMTAG_PICTURE,
+	MMTAG_ALBUM,
 	MMTAG_ALBUM,
 	MMTAG_GENRE,
+	MMTAG_GENRE,
 	MMTAG_TITLE,
+	MMTAG_ARTIST,
 	MMTAG_ARTIST,
 	MMTAG_ALBUMARTIST,
 	MMTAG_PUBLISHER,
 	MMTAG_TRACKNO,
+	MMTAG_TRACKNO,
+	MMTAG_TITLE,
+	MMTAG_DATE,
 	MMTAG_DATE,
 };
 static const char id3v2_frame_str[][4] = {
 	"APIC", // MMTAG_PICTURE
+	"COM\0", // MMTAG_COMMENT
 	"COMM", // MMTAG_COMMENT // "LNG" "SHORT" \0 "TEXT"
+	"PIC\0", // MMTAG_PICTURE
+	"TAL\0", // MMTAG_ALBUM
 	"TALB", // MMTAG_ALBUM
+	"TCO\0", // MMTAG_GENRE
 	"TCON", // MMTAG_GENRE // "Genre" | "(NN)Genre" | "(NN)" where NN is ID3v1 genre index
 	"TIT2", // MMTAG_TITLE
+	"TP1\0", // MMTAG_ARTIST
 	"TPE1", // MMTAG_ARTIST
 	"TPE2", // MMTAG_ALBUMARTIST
 	"TPUB", // MMTAG_PUBLISHER
 	"TRCK", // MMTAG_TRACKNO // "N[/TOTAL]"
+	"TRK\0", // MMTAG_TRACKNO
+	"TT2\0", // MMTAG_TITLE
+	"TYE\0", // MMTAG_DATE
 	"TYER", // MMTAG_DATE
-};
-
-static const ffbyte id3v22_frame_int[] = {
-	MMTAG_COMMENT,
-	MMTAG_PICTURE,
-	MMTAG_ALBUM,
-	MMTAG_GENRE,
-	MMTAG_ARTIST,
-	MMTAG_TRACKNO,
-	MMTAG_TITLE,
-	MMTAG_DATE,
-};
-static const char id3v22_frame_str[][3] = {
-	"COM", // MMTAG_COMMENT
-	"PIC", // MMTAG_PICTURE
-	"TAL", // MMTAG_ALBUM
-	"TCO", // MMTAG_GENRE
-	"TP1", // MMTAG_ARTIST
-	"TRK", // MMTAG_TRACKNO
-	"TT2", // MMTAG_TITLE
-	"TYE", // MMTAG_DATE
 };
 
 struct id3v2_hdr {
@@ -87,6 +82,7 @@ struct id3v2_framehdr {
 	char id[4];
 	ffbyte size[4]; // v2.4: 7-bit bytes
 	ffbyte flags[2]; // [1]: enum ID3V2_FRAME_F
+	// ffbyte text_encoding; // enum ID3V2_TXTENC - for ID starting with 'T' or 'COM'
 };
 
 enum ID3V2_FRAME_F {
@@ -211,32 +207,19 @@ static void _id3v2read_unsync(ffvec *buf, ffstr in)
 	}
 }
 
-static int _id3v2read_frame_read(struct id3v2read *d, ffuint *framesize)
+static int _id3v2read_frame_read(struct id3v2read *d, ffstr in, ffuint *framesize)
 {
 	int tag = MMTAG_UNKNOWN;
 	d->have_txtenc = 0;
+
 	if (d->ver == 2) {
-		const struct id3v22_framehdr *f = (struct id3v22_framehdr*)d->chunk.ptr;
+		const struct id3v22_framehdr *f = (struct id3v22_framehdr*)in.ptr;
 		*framesize = ffint_be_cpu24_ptr(f->size);
-
 		ffsz_copyn(d->frame_id, sizeof(d->frame_id), f->id, 3);
-		int i = ffcharr_findsorted(id3v22_frame_str, FF_COUNT(id3v22_frame_str), sizeof(id3v22_frame_str[0]), f->id, 3);
-		if (i >= 0)
-			tag = id3v22_frame_int[i];
-
-		if (f->id[0] == 'T' || tag == MMTAG_COMMENT)
-			d->have_txtenc = 1;
 
 	} else {
-		const struct id3v2_framehdr *f = (struct id3v2_framehdr*)d->chunk.ptr;
-
+		const struct id3v2_framehdr *f = (struct id3v2_framehdr*)in.ptr;
 		ffsz_copyn(d->frame_id, sizeof(d->frame_id), f->id, 4);
-		int i = ffcharr_findsorted(id3v2_frame_str, FF_COUNT(id3v2_frame_str), sizeof(id3v2_frame_str[0]), f->id, 4);
-		if (i >= 0)
-			tag = id3v2_frame_int[i];
-
-		if (f->id[0] == 'T' || tag == MMTAG_COMMENT)
-			d->have_txtenc = 1;
 
 		if (d->ver == 3) {
 			*framesize = ffint_be_cpu32_ptr(f->size);
@@ -250,6 +233,14 @@ static int _id3v2read_frame_read(struct id3v2read *d, ffuint *framesize)
 			d->frame_flags = f->flags[1];
 		}
 	}
+
+	int i = ffcharr_findsorted(id3v2_frame_str, FF_COUNT(id3v2_frame_str), sizeof(id3v2_frame_str[0]), d->frame_id, 4);
+	if (i >= 0)
+		tag = id3v2_frame_int[i];
+
+	if (in.ptr[0] == 'T' || tag == MMTAG_COMMENT)
+		d->have_txtenc = 1;
+
 	return -tag;
 }
 
@@ -398,7 +389,7 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 			break;
 
 		case R_FRHDR:
-			if ((r = _id3v2read_frame_read(d, &n)) > 0)
+			if ((r = _id3v2read_frame_read(d, d->chunk, &n)) > 0)
 				return r;
 			d->tag = -r;
 
