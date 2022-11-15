@@ -2,7 +2,6 @@
 2021, Simon Zolin
 */
 
-#define FLACREAD_NOCRC
 #include <avpack/flac-ogg-read.h>
 #include <avpack/flac-read.h>
 #include <avpack/flac-write.h>
@@ -91,12 +90,6 @@ const char flac_sample[] = {
 	"\x00\x00\x00\x00\x14\x28\xff\xf8\x79\x18\x0a\x0c\x43\xb3\x00\x00"
 	"\x00\x00\x00\x00\xe2\xc9"
 };
-
-unsigned char flac_crc8(const char *data, unsigned int len)
-{
-	(void)data;  (void)len;
-	return 0;
-}
 
 struct tag {
 	ffuint name;
