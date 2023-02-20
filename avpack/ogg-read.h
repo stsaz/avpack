@@ -465,7 +465,7 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 			if (!o->hdr_done && ffint_le_cpu64_ptr(h->granulepos) != 0) {
 				o->hdr_done = 1;
 				// o->seekpt0.sample = ;
-				o->seekpt0.off = o->off - o->chunk.len;
+				o->seekpt0.off = o->off - _avp_stream_used(&o->stream);
 				// o->info.total_samples -= granulepos;
 			}
 			o->gather_size = r;
