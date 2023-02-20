@@ -3,6 +3,7 @@
 */
 
 #include <avpack/bmp-read.h>
+#include <avpack/bmp-write.h>
 #include <test/test.h>
 
 static const char bmp_sample[] =

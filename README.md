@@ -12,7 +12,6 @@ Contents:
 * [Features](#features)
 * [How to use](#how-to-use)
 * [Test](#test)
-* [History](#history)
 
 
 ## Features
@@ -46,7 +45,7 @@ Contents:
 	* ID3v1 & ID3v2 read/write: `avpack/id3v1.h`, `avpack/id3v2.h`
 	* Vorbis tags read/write: `avpack/vorbistag.h`
 * Graphics:
-	* .bmp read: `avpack/bmp-read.h`
+	* .bmp read/write: `avpack/bmp-read.h`, `avpack/bmp-write.h`
 	* .jpg read: `avpack/jpg-read.h`
 	* .png read: `avpack/png-read.h`
 
@@ -57,8 +56,8 @@ It doesn't contain code that reads or writes files - this is user's responsibili
 
 1. Clone repos:
 
-		$ git clone https://github.com/stsaz/ffbase
-		$ git clone https://github.com/stsaz/avpack
+		git clone https://github.com/stsaz/ffbase
+		git clone https://github.com/stsaz/avpack
 
 2. Set compiler flags in your build script:
 
@@ -110,12 +109,6 @@ Each format writer has a similar set of functions:
 	cd avpack/test
 	make
 	./avpack-test all
-
-
-## History
-
-This is actually a refactored and slightly improved code from another repository `github.com/stsaz/ff`.
-Look for more history there.
 
 
 ## License

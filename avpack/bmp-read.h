@@ -7,14 +7,13 @@ bmpread_open bmpread_close
 bmpread_process
 bmpread_error
 bmpread_info
-*/
-
-/* .bmp format:
-FILEHDR (HDRV3 | HDRV4) (ROW#HEIGHT..ROW#1(BGR#1..BGR#WIDTH [PADDING:1..3]))
+bmpread_line
+bmpread_seek_offset
 */
 
 #pragma once
 
+#include <avpack/bmp-fmt.h>
 #include <ffbase/vector.h>
 
 struct bmp_info {
@@ -29,6 +28,10 @@ typedef struct bmpread {
 	ffvec buf;
 	ffstr chunk;
 	struct bmp_info info;
+	ffuint linesize, linesize_al;
+	ffuint64 seek_off;
+	ffuint line;
+	ffuint data_off;
 } bmpread;
 
 static inline void bmpread_open(bmpread *b)
@@ -41,47 +44,13 @@ static inline void bmpread_close(bmpread *b)
 	ffvec_free(&b->buf);
 }
 
-enum BMP_COMP {
-	BMP_COMP_NONE,
-	BMP_COMP_BITFIELDS = 3,
-};
-
-struct bmp_hdr {
-//file header:
-	ffbyte bm[2]; //"BM"
-	ffbyte filesize[4];
-	ffbyte reserved[4];
-	ffbyte headersize[4];
-
-//bitmap header:
-	ffbyte infosize[4];
-	ffbyte width[4];
-	ffbyte height[4];
-	ffbyte planes[2];
-	ffbyte bpp[2];
-
-	ffbyte compression[4]; //enum BMP_COMP
-	ffbyte sizeimage[4];
-	ffbyte xscale[4];
-	ffbyte yscale[4];
-	ffbyte colors[4];
-	ffbyte clrimportant[4];
-};
-
-struct bmp_hdr4 {
-	ffbyte mask_rgba[4*4];
-	ffbyte cstype[4];
-	ffbyte red_xyz[4*3];
-	ffbyte green_xyz[4*3];
-	ffbyte blue_xyz[4*3];
-	ffbyte gamma_rgb[4*3];
-};
-
 enum BMPREAD_R {
 	BMPREAD_MORE,
-	BMPREAD_HEADER,
+	BMPREAD_HEADER, // get info with bmpread_info()
+	BMPREAD_SEEK, // provide input data at offset = bmpread_seek_offset()
+	BMPREAD_LINE,
 	BMPREAD_DONE,
-	BMPREAD_ERROR,
+	BMPREAD_ERROR, // bmpread_error() returns error message
 };
 
 #define _BMPR_ERR(b, e) \
@@ -92,8 +61,9 @@ static inline const char* bmpread_error(bmpread *b)
 	return b->error;
 }
 
-/** Read header. */
-static int _bmpr_hdr_read(bmpread *b, struct bmp_info *info, const void *data)
+/** Read header.
+Return header size (negative). */
+static int bmp_hdr_read(bmpread *b, struct bmp_info *info, const void *data)
 {
 	const struct bmp_hdr *h = (struct bmp_hdr*)data;
 	if (!!ffmem_cmp(h->bm, "BM", 2))
@@ -127,7 +97,7 @@ static int _bmpr_hdr_read(bmpread *b, struct bmp_info *info, const void *data)
 		return _BMPR_ERR(b, "unsupported format");
 	}
 
-	return 0;
+	return -hdrsize;
 }
 
 #define _BMPR_GATHER(b, _nextstate, len) \
@@ -152,7 +122,7 @@ static inline int bmpread_process(bmpread *b, ffstr *input, ffstr *output)
 			break;
 
 		case R_HDR:
-			r = _bmpr_hdr_read(b, &b->info, b->chunk.ptr);
+			r = bmp_hdr_read(b, &b->info, b->chunk.ptr);
 			switch (r) {
 			case 0x4:
 				_BMPR_GATHER(b, R_HDR4, sizeof(struct bmp_hdr4));
@@ -160,6 +130,10 @@ static inline int bmpread_process(bmpread *b, ffstr *input, ffstr *output)
 			case BMPREAD_ERROR:
 				return BMPREAD_ERROR;
 			}
+			b->data_off = -r;
+			b->linesize = b->info.width * b->info.bpp / 8;
+			b->linesize_al = ffint_align_ceil2(b->linesize, 4);
+			b->state = R_SEEK;
 			return BMPREAD_HEADER;
 
 		case R_HDR4: {
@@ -170,12 +144,24 @@ static inline int bmpread_process(bmpread *b, ffstr *input, ffstr *output)
 				|| 0xff000000 != ffint_be_cpu32_ptr(h4->mask_rgba + 12)
 				|| !!ffmem_cmp(h4->cstype, "BGRs", 4))
 				return _BMPR_ERR(b, "unsupported ver.4 header");
-			b->state = R_DONE;
+			b->state = R_SEEK;
 			return BMPREAD_HEADER;
 		}
 
+		case R_SEEK:
+			b->seek_off = b->data_off + (b->info.height - b->line - 1) * b->linesize_al;
+			_BMPR_GATHER(b, R_DATA, b->linesize_al);
+			return BMPREAD_SEEK;
+
+		case R_DATA:
+			ffstr_set(output, b->chunk.ptr, b->linesize);
+			b->state = R_SEEK;
+			if (++b->line == b->info.height)
+				b->state = R_DONE;
+			return BMPREAD_LINE;
+
 		case R_DONE:
-			return _BMPR_ERR(b, "data reading isn't implemented");
+			return BMPREAD_DONE;
 
 		case R_GATHER:
 			r = ffstr_gather((ffstr*)&b->buf, &b->buf.cap, input->ptr, input->len, b->gather_size, &b->chunk);
@@ -197,3 +183,7 @@ static inline const struct bmp_info* bmpread_info(bmpread *b)
 {
 	return &b->info;
 }
+
+#define bmpread_line(b)  ((b)->line)
+
+#define bmpread_seek_offset(b)  ((b)->seek_off)

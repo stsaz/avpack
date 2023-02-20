@@ -2,6 +2,8 @@
 2021, Simon Zolin */
 
 #include <avpack/ape-read.h>
+#include <avpack/bmp-read.h>
+#include <avpack/bmp-write.h>
 #include <avpack/flac-ogg-read.h>
 #include <avpack/flac-read.h>
 #include <avpack/flac-write.h>
