@@ -146,7 +146,7 @@ static int _oggread_page(oggread *o, ffstr page)
 		o->page_endpos = page_endpos;
 
 	ffuint64 page_off = o->off - _avp_stream_used(&o->stream);
-	_oggread_log(o, "page #%u/%xu  end-pos:%U  packets:%u  continued:%u  size:%u  offset:%xU"
+	_oggread_log(o, "page #%u/%xu  end-pos:%D  packets:%u  continued:%u  size:%u  offset:%xU"
 		, o->page_num, ffint_le_cpu32_ptr(h->serial), page_endpos
 		, ogg_pkt_num(h), !!(h->flags & OGG_FCONTINUED)
 		, page.len, page_off);
