@@ -328,7 +328,9 @@ static inline int mp4_afmt_read(ffstr data, struct mp4_aformat *f)
 	const struct mp4_afmt *afmt = (struct mp4_afmt*)data.ptr;
 	f->bits = ffint_be_cpu16_ptr(afmt->bits);
 	f->channels = ffint_be_cpu16_ptr(afmt->channels);
-	f->rate = ffint_be_cpu16_ptr(afmt->rate);
+
+	if (f->rate == 0)
+		f->rate = ffint_be_cpu16_ptr(afmt->rate);
 
 	ffuint ver = ffint_be_cpu16_ptr(afmt->ver);
 	if (ver == 1) {
@@ -347,7 +349,8 @@ static inline ffuint mp4_afmt_write(void *dst, const struct mp4_aformat *f)
 	struct mp4_afmt *afmt = (struct mp4_afmt*)dst;
 	*(ffushort*)afmt->bits = ffint_be_cpu16(f->bits);
 	*(ffushort*)afmt->channels = ffint_be_cpu16(f->channels);
-	*(ffushort*)afmt->rate = ffint_be_cpu16(f->rate);
+	if (f->rate <= 0xffff)
+		*(ffushort*)afmt->rate = ffint_be_cpu16(f->rate);
 	return sizeof(struct mp4_afmt);
 }
 

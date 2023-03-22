@@ -369,6 +369,12 @@ static inline int _mp4_box_process(mp4read *m, ffstr *data)
 		ffmem_zero_obj(m->curtrack);
 		break;
 
+	case BOX_MDHD: {
+		const struct mp4_mdhd0 *mdhd = (struct mp4_mdhd0*)data->ptr;
+		m->curtrack->audio.format.rate = ffint_be_cpu32_ptr(mdhd->timescale);
+		break;
+	}
+
 	case BOX_STSD_ALAC:
 	case BOX_STSD_MP4A:
 		rd = mp4_afmt_read(sbox, &m->curtrack->audio.format);
