@@ -44,8 +44,8 @@ typedef struct flacwrite {
 	ffuint seektab_off;
 
 	ffuint frames_len;
-	int fin :1;
-	int outdev_seekable :1;
+	ffuint fin :1;
+	ffuint outdev_seekable :1;
 } flacwrite;
 
 /**

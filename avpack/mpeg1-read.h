@@ -39,8 +39,8 @@ typedef struct mpeg1read {
 	ffuint64 cur_sample, seek_sample;
 	ffbyte vbr_toc[100];
 	ffbyte prev_hdr[4];
-	int hdr :1;
-	int unrecognized_data :1;
+	ffuint hdr :1;
+	ffuint unrecognized_data :1;
 
 	struct mpeg1read_info info;
 	ffuint64 total_size;

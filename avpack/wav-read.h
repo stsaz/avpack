@@ -49,7 +49,7 @@ typedef struct wavread {
 		, off;
 	ffuint64 cursample;
 	ffuint64 seek_sample;
-	int has_fmt :1
+	ffuint has_fmt :1
 		, fin :1
 		, inf_data :1
 		;

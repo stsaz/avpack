@@ -26,7 +26,7 @@ typedef struct wavwrite {
 	ffuint sampsize;
 	ffuint64 off;
 	struct wav_info info;
-	int fin :1;
+	ffuint fin :1;
 } wavwrite;
 
 /**

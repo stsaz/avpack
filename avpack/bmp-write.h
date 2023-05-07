@@ -11,6 +11,11 @@ bmpwrite_seek_offset
 bmpwrite_size
 */
 
+#pragma once
+
+#include <avpack/bmp-fmt.h>
+#include <ffbase/vector.h>
+
 typedef struct bmpwrite_info {
 	ffuint width, height;
 	ffuint bpp;
@@ -30,7 +35,7 @@ typedef struct bmpwrite {
 } bmpwrite;
 
 #define _BMPW_ERR(b, e) \
-	(b)->error = (e),  BMPREAD_ERROR
+	(b)->error = (e),  BMPWRITE_ERROR
 
 #define bmpwrite_error(b)  (b)->error
 
