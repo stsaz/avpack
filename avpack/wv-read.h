@@ -52,6 +52,7 @@ typedef struct wvread {
 	struct wv_seekpoint seekpt[2];
 	ffuint64 last_seek_off;
 	ffuint64 seek_sample;
+	uint eof :1;
 
 	struct id3v1read id3v1;
 	struct apetagread apetag;
@@ -336,15 +337,20 @@ static inline int wvread_process(wvread *w, ffstr *input, ffstr *output)
 
 		case R_SEEK_HDR: {
 			struct wv_hdr h;
-			if (0 != _wvr_hdr_find(w, &h, input, &w->chunk))
+			if (0 != _wvr_hdr_find(w, &h, input, &w->chunk)) {
+				if (w->eof)
+					goto seek_edge;
 				return WVREAD_MORE;
+			}
 
 			ffuint64 blk_off = w->off - sizeof(struct wv_hdr_fmt);
 			if (w->buf.len != 0)
 				blk_off = w->off - w->buf.len;
 
 			if (blk_off >= w->seekpt[1].off) {
-				ffint64 o = _wvr_seek_adjust_edge(w, w->seekpt, w->last_seek_off);
+				ffint64 o;
+seek_edge:
+				o = _wvr_seek_adjust_edge(w, w->seekpt, w->last_seek_off);
 				if (o >= 0) {
 					w->off = o;
 					w->last_seek_off = w->off;
@@ -498,6 +504,8 @@ static inline int wvread_tag(wvread *w, ffstr *name, ffstr *val)
 }
 
 #define wvread_offset(w)  ((w)->off)
+
+#define wvread_eof(w, val)  ((w)->eof = val)
 
 #define wvread_cursample(w)  ((w)->block_index)
 

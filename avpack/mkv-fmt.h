@@ -189,7 +189,7 @@ static inline int mkv_read_id_size(ffstr d, ffuint *id, ffuint64 *size)
 	else if (r2 < 0)
 		return -((int)d.len + -r2);
 
-	ffuint64 id64;
+	ffuint64 id64 = 0;
 	mkv_int_ntoh(&id64, d.ptr, r);
 	*id = id64;
 	return r + r2;

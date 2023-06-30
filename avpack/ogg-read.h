@@ -60,6 +60,7 @@ typedef struct oggread {
 		, pkt_incomplete :1 // expecting continued packet on next page
 		, unrecognized_data :1
 		, hdr_done :1
+		, eof :1
 		;
 
 	ogg_log_t log;
@@ -220,6 +221,8 @@ static int _oggread_seek_hdr(oggread *o, ffstr *input)
 	}
 
 	if (r == 0) {
+		if (o->eof)
+			return _oggread_seek_adjust_edge(o, o->seekpt);
 		return OGGREAD_MORE;
 	}
 
@@ -537,3 +540,5 @@ static inline void oggread_seek(oggread *o, ffuint64 sample)
 
 /** Get an absolute file offset to seek */
 #define oggread_offset(o)  ((o)->off)
+
+#define oggread_eof(o, val)  ((o)->eof = val)
