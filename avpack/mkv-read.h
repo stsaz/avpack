@@ -411,7 +411,7 @@ static int _mkvread_el(mkvread *m, ffstr *output)
 
 	case MKV_T_TAG_NAME:
 		ffvec_free(&m->tagname);
-		ffstr_dup2((ffstr*)&m->tagname, &data);
+		ffvec_addstr(&m->tagname, &data);
 		break;
 
 	case MKV_T_TAG_VAL:

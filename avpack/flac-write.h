@@ -62,6 +62,7 @@ static inline void flacwrite_create(flacwrite *f, const struct flac_info *info, 
 static inline void flacwrite_close(flacwrite *f)
 {
 	vorbistagwrite_destroy(&f->vtag);
+	ffmem_free(f->sktab.ptr);
 	ffvec_free(&f->buf);
 }
 

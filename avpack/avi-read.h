@@ -76,6 +76,7 @@ static inline void aviread_close(aviread *a)
 	FFSLICE_WALK(&a->tracks, t) {
 		ffstr_free(&t->codec_conf);
 	}
+	ffvec_free(&a->tracks);
 }
 
 #define aviread_cursample(a)  ((a)->nsamples - (a)->curtrack->blocksize)
