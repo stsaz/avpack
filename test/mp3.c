@@ -66,7 +66,7 @@ ffvec test_mp3_write()
 	m.id3v2_min_size = 200;
 
 	const struct tag *tag;
-	FFARRAY_FOREACH(tags, tag) {
+	FF_FOREACH(tags, tag) {
 		ffstr val = FFSTR_INITZ(tag->val);
 		x(0 == mp3write_addtag(&m, tag->name, val));
 	}
@@ -133,7 +133,7 @@ void test_mp3_read(ffstr data, int partial)
 			ffuint t = mp3read_tag(&m, &name, &val);
 			int k = 0;
 			const struct tag *tag;
-			FFARRAY_FOREACH(tags, tag) {
+			FF_FOREACH(tags, tag) {
 				if (tag->name == t) {
 					xseq(&val, tag->val);
 					k = 1;

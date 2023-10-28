@@ -21,7 +21,7 @@ void test_vorbistag()
 	};
 	vorbistagwrite vw = {};
 	const struct tag *t;
-	FFARRAY_FOREACH(tags, t) {
+	FF_FOREACH(tags, t) {
 		ffstr val = FFSTR_INITZ(t->val);
 		vorbistagwrite_add(&vw, t->name, val);
 	}

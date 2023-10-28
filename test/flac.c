@@ -119,7 +119,7 @@ ffvec test_flac_write()
 	flacwrite_create(&f, &info, 0);
 
 	const struct tag *tag;
-	FFARRAY_FOREACH(tags, tag) {
+	FF_FOREACH(tags, tag) {
 		ffstr val = FFSTR_INITZ(tag->val);
 		x(0 == flacwrite_addtag(&f, tag->name, val));
 	}
@@ -183,7 +183,7 @@ void test_flac_read(ffstr data, int partial, int seek)
 			ffuint t = flacread_tag(&f, &name, &val);
 			// int k = 0;
 			const struct tag *tag;
-			FFARRAY_FOREACH(tags, tag) {
+			FF_FOREACH(tags, tag) {
 				if (tag->name == t) {
 					// xseq(&val, tag->val);
 					// k = 1;

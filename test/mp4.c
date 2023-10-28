@@ -34,7 +34,7 @@ ffvec test_mp4_write()
 	x(0 == mp4write_create_aac(&m, &info));
 
 	const struct tag *tag;
-	FFARRAY_FOREACH(tags, tag) {
+	FF_FOREACH(tags, tag) {
 		ffstr val = FFSTR_INITZ(tag->val);
 		x(0 == mp4write_addtag(&m, tag->name, val));
 	}
@@ -108,7 +108,7 @@ void test_mp4_read(ffstr data, int partial)
 			ffuint t = mp4read_tag(&m, &val);
 			int k = 0;
 			const struct tag *tag;
-			FFARRAY_FOREACH(tags, tag) {
+			FF_FOREACH(tags, tag) {
 				if (tag->name == t) {
 					xseq(&val, tag->val);
 					k = 1;

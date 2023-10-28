@@ -54,7 +54,7 @@ void test_apetag()
 			x(r <= 0);
 			const struct tag *tag;
 			int k = 0;
-			FFARRAY_FOREACH(tags, tag) {
+			FF_FOREACH(tags, tag) {
 				if (ffstr_eqz(&name, tag->name)) {
 					xseq(&val, tag->val);
 					k = 1;
