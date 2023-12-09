@@ -226,7 +226,7 @@ static int _aviread_chunk(aviread *a)
 		const struct avi_chunk *ch = (struct avi_chunk*)a->gbuf.ptr;
 		ffuint idx;
 		if (2 != ffs_toint(ch->id, 2, &idx, FFS_INT32)
-			|| idx != a->curtrack - (struct avi_audio_info*)a->tracks.ptr
+			|| (int)idx != a->curtrack - (struct avi_audio_info*)a->tracks.ptr
 			|| !!ffmem_cmp(ch->id + 2, AVI_MOVI_AUDIO, 2)) {
 			break;
 		}
