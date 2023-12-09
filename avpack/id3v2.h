@@ -46,9 +46,9 @@ static const ffbyte id3v2_frame_int[] = {
 	MMTAG_DATE,
 };
 static const char id3v2_frame_str[][4] = {
-	"APIC", // MMTAG_PICTURE
+	"APIC", // MMTAG_PICTURE // "MIME" \0 TYPE[1] "DESCRIPTION" \0 DATA[]
 	"COM\0", // MMTAG_COMMENT
-	"COMM", // MMTAG_COMMENT // "LNG" "SHORT" \0 "TEXT"
+	"COMM", // MMTAG_COMMENT // "LNG"[3] "SHORT" \0 "TEXT"
 	"PIC\0", // MMTAG_PICTURE
 	"TAL\0", // MMTAG_ALBUM
 	"TALB", // MMTAG_ALBUM
@@ -64,6 +64,18 @@ static const char id3v2_frame_str[][4] = {
 	"TT2\0", // MMTAG_TITLE
 	"TYE\0", // MMTAG_DATE
 	"TYER", // MMTAG_DATE
+};
+static const char id3v2_frame_str_v24[][4] = {
+	[MMTAG_ALBUM] =			"TALB",
+	[MMTAG_ALBUMARTIST] =	"TPE2",
+	[MMTAG_ARTIST] =		"TPE1",
+	[MMTAG_COMMENT] =		"COMM",
+	[MMTAG_DATE] =			"TYER",
+	[MMTAG_GENRE] =			"TCON",
+	[MMTAG_PICTURE] =		"APIC",
+	[MMTAG_PUBLISHER] =		"TPUB",
+	[MMTAG_TITLE] =			"TIT2",
+	[MMTAG_TRACKNO] =		"TRCK",
 };
 
 struct id3v2_hdr {
@@ -82,7 +94,7 @@ struct id3v2_framehdr {
 	char id[4];
 	ffbyte size[4]; // v2.4: 7-bit bytes
 	ffbyte flags[2]; // [1]: enum ID3V2_FRAME_F
-	// ffbyte text_encoding; // enum ID3V2_TXTENC - for ID starting with 'T' or 'COM'
+	// ffbyte text_encoding; // enum ID3V2_TXTENC - for ID starting with 'T' or 'COM', or 'APIC'
 };
 
 enum ID3V2_FRAME_F {
@@ -143,6 +155,7 @@ struct id3v2read {
 	char frame_id[5];
 
 	ffuint codepage;
+	ffuint as_is; // don't decode/convert values
 };
 
 static inline void id3v2read_open(struct id3v2read *d)
@@ -445,7 +458,8 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 		case R_DATA:
 			switch (d->tag) {
 			case MMTAG_COMMENT:
-				if (d->chunk.len >= FFS_LEN("LNG\0")) {
+				if (!d->as_is
+					&& d->chunk.len >= FFS_LEN("LNG\0")) {
 					// skip language, short description and NULL
 					ffstr_shift(&d->chunk, FFS_LEN("LNG"));
 					switch (d->txtenc) {
@@ -467,7 +481,10 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 
 			d->state = R_FR;
 
-			if (0xdeed != (r = _id3v2read_text_decode(d, d->chunk, value)))
+			*value = d->chunk;
+			if (!d->as_is
+				&& d->tag != MMTAG_PICTURE
+				&& 0xdeed != (r = _id3v2read_text_decode(d, d->chunk, value)))
 				return r;
 
 			if (value->len != 0 && *ffslice_lastT(value, char) == '\0')
@@ -518,6 +535,7 @@ struct id3v2write {
 	ffvec buf;
 	char trackno[32];
 	char tracktotal[32];
+	ffuint as_is; // don't encode comment and picture
 };
 
 static inline void id3v2write_create(struct id3v2write *w)
@@ -531,12 +549,9 @@ static inline void id3v2write_close(struct id3v2write *w)
 	ffvec_free(&w->buf);
 }
 
-static int _id3v2write_addframe(struct id3v2write *w, const char *id, const char *data, ffsize len)
+static int _id3v2write_addframe(struct id3v2write *w, const char *id, ffstr prefix, ffstr data, ffuint flags)
 {
-	ffsize n = sizeof(struct id3v2_framehdr) + 1 + len;
-
-	if (!ffmem_cmp(id, "COMM", 4))
-		n += FFS_LEN("LNG\0");
+	ffsize n = sizeof(struct id3v2_framehdr) + 1 + prefix.len + data.len;
 
 	if (NULL == ffvec_grow(&w->buf, n, 1))
 		return -1;
@@ -549,15 +564,32 @@ static int _id3v2write_addframe(struct id3v2write *w, const char *id, const char
 	fr->flags[0] = 0,  fr->flags[1] = 0;
 	p += sizeof(*fr);
 
-	*p++ = ID3V2_UTF8;
+	if (flags & 1)
+		*p++ = ID3V2_UTF8;
 
-	if (!ffmem_cmp(id, "COMM", 4))
-		p = ffmem_copy(p, "eng\0", 4);
-
-	ffmem_copy(p, data, len);
+	p = ffmem_copy(p, prefix.ptr, prefix.len);
+	ffmem_copy(p, data.ptr, data.len);
 
 	w->buf.len += n;
 	return 0;
+}
+
+/** Prepare TRCK frame data: "TRACKNO [/ TRACKTOTAL]" */
+static ffstr _id3v2_trackno(struct id3v2write *w)
+{
+	char *p = w->trackno;
+	if (w->trackno[0] != '\0')
+		p += ffsz_len(w->trackno);
+	else
+		*p++ = '0';
+
+	if (w->tracktotal[0] != '\0') {
+		*p++ = '/';
+		p = ffmem_copy(p, w->tracktotal, ffsz_len(w->tracktotal));
+	}
+
+	ffstr d = FFSTR_INITN(w->trackno, p - w->trackno);
+	return d;
 }
 
 /** Add frame
@@ -566,36 +598,59 @@ Return 0 on success
  <0 on error */
 static inline int id3v2write_add(struct id3v2write *w, ffuint id, ffstr data)
 {
+	ffstr prefix = {};
+	char prefix_buf[4];
+	ffuint flags = 1;
+
 	switch (id) {
+	case MMTAG_COMMENT:
+		if (!w->as_is) {
+			ffmem_copy(prefix_buf, "eng\0", 4);
+			ffstr_set(&prefix, prefix_buf, 4);
+		}
+		break;
+
+	case MMTAG_PICTURE:
+		if (!w->as_is)
+			return 1; // not implemented
+		flags = 0;
+		break;
+
 	case MMTAG_TRACKNO:
 		ffsz_copyn(w->trackno, sizeof(w->trackno), data.ptr, data.len);
-		return 0;
+		if (w->tracktotal[0] == '\0')
+			return 0; // waiting for MMTAG_TRACKTOTAL
+		data = _id3v2_trackno(w);
+		break;
+
 	case MMTAG_TRACKTOTAL:
 		ffsz_copyn(w->tracktotal, sizeof(w->tracktotal), data.ptr, data.len);
-		return 0;
+		if (w->trackno[0] == '\0')
+			return 0; // waiting for MMTAG_TRACKNO
+		data = _id3v2_trackno(w);
+		id = MMTAG_TRACKNO;
+		break;
 	}
 
-	if (-1 == (int)(id = ffarrint8_find(id3v2_frame_int, FF_COUNT(id3v2_frame_int), id)))
-		return 1;
-	return _id3v2write_addframe(w, id3v2_frame_str[id], data.ptr, data.len);
+	if (id >= FF_COUNT(id3v2_frame_str_v24)
+		|| id3v2_frame_str_v24[id][0] == '\0')
+		return 1; // tag id not supported
+
+	int r = _id3v2write_addframe(w, id3v2_frame_str_v24[id], prefix, data, flags);
+	if (r != 0)
+		return r;
+
+	if (id == MMTAG_TRACKNO) {
+		w->trackno[0] = w->tracktotal[0] = '\0';
+	}
+	return 0;
 }
 
 /** Finalize ID3v2 tag data */
 static inline int id3v2write_finish(struct id3v2write *w, ffsize padding)
 {
-	// prepare TRCK frame data: "TRACKNO [/ TRACKTOTAL]"
 	if (w->trackno[0] != '\0' || w->tracktotal[0] != '\0') {
-		char *p = w->trackno + ffsz_len(w->trackno);
-		if (w->trackno[0] == '\0')
-			*p++ = '0';
-
-		if (w->tracktotal[0] != '\0') {
-			const char *end = w->trackno + sizeof(w->trackno);
-			p += ffmem_ncopy(p, end - p, "/", 1);
-			p += ffmem_ncopy(p, end - p, w->tracktotal, ffsz_len(w->tracktotal));
-		}
-
-		if (0 != _id3v2write_addframe(w, "TRCK", w->trackno, p - w->trackno))
+		if (0 != _id3v2write_addframe(w, "TRCK", FFSTR_Z(""), _id3v2_trackno(w), 1))
 			return -1;
 	}
 
