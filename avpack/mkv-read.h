@@ -253,8 +253,8 @@ static int _mkvread_block(mkvread *m, ffstr *data)
 /** Process element header */
 static int _mkvread_el_hdr(mkvread *m)
 {
-	ffuint id;
-	ffuint64 size;
+	ffuint id = 0;
+	ffuint64 size = 0;
 	int n = mkv_read_id_size(m->gbuf, &id, &size);
 	if (n == 0) {
 		return _MKVR_ERRSTR(m, "bad element ID or size");
