@@ -223,6 +223,11 @@ static inline int mp3read_process(mp3read *m, ffstr *input, ffstr *output)
 			r = mpeg1read_process(&m->rd, input, output);
 			m->off = m->data_off + mpeg1read_offset(&m->rd);
 			switch (r) {
+			case MPEG1READ_HEADER:
+			case MPEG1READ_DATA:
+				m->off = m->data_off + mpeg1read_frame_offset(&m->rd);
+				break;
+
 			case MPEG1READ_MORE:
 				if (m->total_size != 0 && m->off >= m->total_size)
 					return MP3READ_DONE;

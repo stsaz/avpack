@@ -35,7 +35,7 @@ typedef struct mpeg1read {
 	ffuint gather_size;
 	struct avp_stream stream;
 	ffstr chunk;
-	ffuint64 off, frame1_off;
+	ffuint64 off, frame1_off, frame_off;
 	ffuint64 cur_sample, seek_sample;
 	ffbyte vbr_toc[100];
 	ffbyte prev_hdr[4];
@@ -217,6 +217,7 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 				r = _mpeg1read_info(m, m->chunk, r);
 				m->frame1_off = m->off - m->chunk.len + r;
 				ffmem_copy(m->prev_hdr, m->chunk.ptr, 4);
+				m->frame_off = m->off - _avp_stream_used(&m->stream);
 				if (r != 0) {
 					// skip and return Xing tag
 					ffstr_set(output, m->chunk.ptr, r);
@@ -267,6 +268,7 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 
 		// case R_FRAME:
 			ffstr_set(output, m->chunk.ptr, m->gather_size);
+			m->frame_off = m->off - _avp_stream_used(&m->stream);
 			m->state = R_FRAME_NEXT;
 			return MPEG1READ_DATA;
 
@@ -291,5 +293,7 @@ static inline void mpeg1read_seek(mpeg1read *m, ffuint64 sample)
 }
 
 #define mpeg1read_cursample(m)  ((m)->cur_sample)
+
+#define mpeg1read_frame_offset(m)  ((m)->frame_off)
 
 #define mpeg1read_offset(m)  ((m)->off)
