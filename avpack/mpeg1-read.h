@@ -158,6 +158,25 @@ static inline int _mpeg1read_info(mpeg1read *m, ffstr data, ffuint frsz)
 	return frsz;
 }
 
+/** Estimate file offset by sample */
+static ffint64 _mpeg1r_seek_offset(mpeg1read *m, ffuint64 target)
+{
+	ffuint64 total_samples = m->info.delay + m->info.total_samples + m->info.padding;
+	if (m->total_size == 0
+		|| target >= total_samples)
+		return -1;
+
+	ffint64 off;
+	if (m->vbr_toc[98] != 0)
+		off = mpeg1_xing_seek(m->vbr_toc, target, m->info.total_samples, m->total_size);
+	else
+		off = target * (m->total_size - m->frame1_off) / total_samples;
+	off -= 960; // max mp3 frame size (320kbps 48KHz)
+	if (off < 0)
+		off = 0;
+	return m->frame1_off + off;
+}
+
 /**
 Return enum MPEG1READ_R */
 /* MPEG read alrogithm:
@@ -233,20 +252,10 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 		case R_HDR:
 		case R_FRAME:
 			if (m->seek_sample != (ffuint64)-1) {
-
-				if (m->total_size == 0
-					|| m->seek_sample >= m->info.total_samples)
+				ffint64 off;
+				if (-1 == (off = _mpeg1r_seek_offset(m, m->seek_sample)))
 					return _MPEG1R_ERR(m, "can't seek");
-
-				ffuint64 off;
-				if (m->vbr_toc[98] != 0)
-					off = mpeg1_xing_seek(m->vbr_toc, m->seek_sample, m->info.total_samples, m->total_size);
-				else
-					off = m->seek_sample * m->total_size / m->info.total_samples;
-				off -= mpeg1_size(m->prev_hdr);
-				if ((ffint64)off < 0)
-					off = 0;
-				m->off = m->frame1_off + off;
+				m->off = off;
 				m->cur_sample = m->seek_sample;
 				m->seek_sample = (ffuint64)-1;
 				_avp_stream_reset(&m->stream);
