@@ -200,7 +200,7 @@ static int _mpcr_sh_read(mpcread *m, ffstr body)
 		return _MPCR_ERR(m, "bad SH block");
 	i += n;
 
-	if (i + 2 != body.len)
+	if (i + 2 > body.len)
 		return _MPCR_ERR(m, "bad SH block");
 
 	static const ffushort mpc_rates[] = { 44100, 48000, 37800, 32000 };
