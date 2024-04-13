@@ -104,7 +104,7 @@ static inline int wavwrite_process(wavwrite *w, ffstr *input, ffstr *output)
 
 		if (w->state == W_HDRFIN) {
 			w->state = W_DONE;
-			return WAVWRITE_DATA;
+			return WAVWRITE_HEADER;
 		}
 
 		w->dsize = 0;
