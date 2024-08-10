@@ -214,9 +214,11 @@ static inline int mp3read_process(mp3read *m, ffstr *input, ffstr *output)
 			m->off = m->data_off;
 			return MPEG1READ_SEEK;
 
-		case R_HDR:
-			mpeg1read_open(&m->rd, m->total_size - m->data_off);
+		case R_HDR: {
+			ffuint64 stream_size = (m->total_size != 0) ? m->total_size - m->data_off : 0;
+			mpeg1read_open(&m->rd, stream_size);
 			m->state = R_FRAMES;
+		}
 			// fallthrough
 
 		case R_FRAMES:
