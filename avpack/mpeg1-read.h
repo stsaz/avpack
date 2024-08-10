@@ -266,6 +266,7 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 			if (m->state == R_HDR) {
 				h = m->chunk.ptr;
 				if (!mpeg1_match(h, m->prev_hdr)) {
+					_avp_stream_consume(&m->stream, 1);
 					m->state = R_HDR_FIND;
 					continue;
 				}
