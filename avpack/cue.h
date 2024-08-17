@@ -154,9 +154,14 @@ static inline int cueread_process(cueread *c, ffstr *input, ffstr *output)
 
 		case K_INDEX: {
 			ffuint idx, min, sec, frames;
-			if (0 != ffstr_matchfmt(&c->line, "%2u %u:%2u:%2u", &idx, &min, &sec, &frames))
-				return _CUER_WARN(c, "bad index value");
-			ffstr_set(output, &c->line.ptr[3], c->line.len - 3);
+			val = c->line;
+			if (0 == (r = ffs_toint(val.ptr, val.len, &idx, FFS_INT32)))
+				return _CUER_WARN(c, "bad INDEX value");
+			ffstr_shift(&val, r);
+			ffstr_skipany(&val, &ws);
+			if (0 != ffstr_matchfmt(&val, "%u:%2u:%2u", &min, &sec, &frames))
+				return _CUER_WARN(c, "bad INDEX value");
+			*output = val;
 			c->cdframes = (ffuint64)(min*60 + sec) * 75 + frames;
 			return (idx == 0) ? CUEREAD_TRK_INDEX00 : CUEREAD_TRK_INDEX;
 		}
@@ -173,7 +178,7 @@ static inline int cueread_process(cueread *c, ffstr *input, ffstr *output)
 
 		case K_TRACK:
 			if (!ffstr_to_uint32(&val, &c->track_num))
-				return _CUER_WARN(c, "bad track number");
+				return _CUER_WARN(c, "bad TRACK number");
 			return CUEREAD_TRK_NUM;
 		}
 
