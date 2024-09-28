@@ -147,9 +147,9 @@ static int _oggread_page(oggread *o, ffstr page)
 		o->page_endpos = page_endpos;
 
 	ffuint64 page_off = o->off - _avp_stream_used(&o->stream);
-	_oggread_log(o, "page #%u/%xu  end-pos:%D  packets:%u  continued:%u  size:%u  offset:%xU"
+	_oggread_log(o, "page #%u/%xu  end-pos:%D  packets:%u  flags:%xu  size:%u  offset:%xU"
 		, o->page_num, ffint_le_cpu32_ptr(h->serial), page_endpos
-		, ogg_pkt_num(h), !!(h->flags & OGG_FCONTINUED)
+		, ogg_pkt_num(h), (int)h->flags
 		, page.len, page_off);
 
 	ffuint crc = ogg_checksum(page.ptr, page.len);
@@ -315,7 +315,7 @@ static int _oggread_pkt(oggread *o, ffstr *output)
 	}
 
 	o->pkt_num++;
-	if (!o->hdr_done && o->page_endpos == 0)
+	if (o->page_endpos == 0)
 		return OGGREAD_HEADER;
 	return OGGREAD_DATA;
 }
@@ -462,9 +462,7 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 				_oggread_log(o, "unrecognized data before OGG page header");
 			}
 
-			if (!o->hdr_done && o->info.serial == 0) {
-				o->info.serial = ffint_le_cpu32_ptr(h->serial);
-			}
+			o->info.serial = ffint_le_cpu32_ptr(h->serial);
 			if (!o->hdr_done && ffint_le_cpu64_ptr(h->granulepos) != 0) {
 				o->hdr_done = 1;
 				// o->seekpt0.sample = ;
