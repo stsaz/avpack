@@ -34,6 +34,7 @@ Contents:
 |  .mpc read | [mpc-read.h](avpack/mpc-read.h) |
 |  .ogg(FLAC) read | [flac-ogg-read.h](avpack/flac-ogg-read.h) |
 |  .ogg/.opus read/write | [ogg-read.h](avpack/ogg-read.h), [ogg-write.h](avpack/ogg-write.h) |
+|  .ts read | [ts-read.h](avpack/ts-read.h) |
 |  .wav read/write | [wav-read.h](avpack/wav-read.h), [wav-write.h](avpack/wav-write.h) |
 |  .wv read/write | [wv-read.h](avpack/wv-read.h) |
 | **Audio streams:** | |
