@@ -26,10 +26,12 @@ struct ts_packet {
 	ffuint pid, counter;
 	ffuint start;
 	ffuint64 pos_msec;
+	ffuint64 off;
 	ffstr body;
 };
 
 enum TS_STREAM {
+	TS_STREAM_AUDIO_MP3 = 3,
 	TS_STREAM_AUDIO_AAC = 15,
 };
 
@@ -120,6 +122,7 @@ static inline void tsread_close(tsread *t)
 
 enum TSREAD_R {
 	TSREAD_ERROR,
+	TSREAD_WARN,
 	TSREAD_MORE,
 	TSREAD_DATA,
 };
@@ -153,6 +156,7 @@ payload[]
 static int _tsr_pkt_read(tsread *t, ffstr data, struct ts_packet *p)
 {
 	ffmem_zero_obj(p);
+	p->off = t->off - _avp_stream_used(&t->stream);
 
 	ffuint n;
 	const ffbyte *d = (ffbyte*)data.ptr, *end = (ffbyte*)data.ptr + data.len;
@@ -189,7 +193,7 @@ static int _tsr_pkt_read(tsread *t, ffstr data, struct ts_packet *p)
 	_tsr_log(t, "packet #%u: pid:%xu  counter:%u  adaptation:%u(%xu)  start:%u  payload:%u  offset:%xU"
 		, t->n_pkt++, p->pid, p->counter
 		, ada_len, ada_flags
-		, p->start, (int)p->body.len, t->off - t->gather);
+		, p->start, (int)p->body.len, p->off);
 
 	return 0;
 
@@ -209,8 +213,7 @@ static int _tsr_top_read(tsread *t, ffstr data)
 	d += 8;
 	d += 2;
 
-
-	ffuint pid = ffint_be_cpu16_ptr(d) & 0x0fff;
+	ffuint pid = ffint_be_cpu16_ptr(d) & 0x1fff;
 	d += 2;
 	struct _tsr_pm *pm = _tsr_pm_add(t, pid);
 	pm->type = _TSR_PMT_INFO;
@@ -245,7 +248,7 @@ static int _tsr_info_read(tsread *t, ffstr data)
 	d += 2;
 	d += 3;
 
-	ffuint pid = ffint_be_cpu16_ptr(d) & 0x0fff;
+	ffuint pid = ffint_be_cpu16_ptr(d) & 0x1fff;
 	d += 2;
 	struct _tsr_pm *pm = _tsr_pm_add(t, pid);
 	pm->type = _TSR_PMT_DATA;
@@ -330,8 +333,10 @@ static inline int tsread_process(tsread *t, ffstr *input, ffstr *output)
 			return TSREAD_MORE;
 		chunk.len = t->gather;
 
-		if (_tsr_pkt_read(t, chunk, &t->pkt))
-			return TSREAD_ERROR;
+		r = _tsr_pkt_read(t, chunk, &t->pkt);
+		_avp_stream_consume(&t->stream, t->gather);
+		if (r)
+			return TSREAD_WARN;
 
 		struct _tsr_pm *pm = ffmap_find_hash(&t->pms, t->pkt.pid, (void*)(ffsize)t->pkt.pid, 4, NULL);
 		if (!pm) {
@@ -357,12 +362,9 @@ static inline int tsread_process(tsread *t, ffstr *input, ffstr *output)
 			}
 
 			*output = t->pkt.body;
-			_avp_stream_consume(&t->stream, t->gather);
 			t->cur = pm;
 			return TSREAD_DATA;
 		}
-
-		_avp_stream_consume(&t->stream, t->gather);
 	}
 }
 
@@ -373,4 +375,4 @@ static inline const struct _tsr_pm* tsread_info(tsread *t)
 
 #define tsread_pos_msec(t)  ((t)->cur->pos_msec)
 
-#define tsread_offset(t)  ((t)->off)
+#define tsread_offset(t)  ((t)->pkt.off)
