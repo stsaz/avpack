@@ -44,7 +44,7 @@ typedef struct oggread {
 
 	ffvec pkt_data; // holds partial packet data
 	ffuint64 page_startpos, page_endpos;
-	ffuint page_num;
+	ffuint page_num, page_counter;
 	ffuint pkt_num;
 	ffuint seg_off;
 	ffuint body_off;
@@ -141,6 +141,7 @@ static int _oggread_page(oggread *o, ffstr page)
 	const struct ogg_hdr *h = (struct ogg_hdr*)page.ptr;
 	o->page_continued = !!(h->flags & OGG_FCONTINUED);
 	o->page_num = ffint_le_cpu32_ptr(h->number);
+	o->page_counter++;
 	o->page_startpos = o->page_endpos;
 	ffuint64 page_endpos = ffint_le_cpu64_ptr(h->granulepos);
 	if (page_endpos != (ffuint64)-1)
@@ -535,6 +536,8 @@ static inline void oggread_seek(oggread *o, ffuint64 sample)
 
 #define oggread_page_num(o)  ((o)->page_num)
 #define oggread_pkt_num(o)  ((o)->pkt_num - 1)
+
+#define oggread_pkt_last(o) ((o)->seg_off == ((struct ogg_hdr*)o->chunk.ptr)->nsegments)
 
 /** Get an absolute file offset to seek */
 #define oggread_offset(o)  ((o)->off)

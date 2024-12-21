@@ -128,7 +128,16 @@ static inline int vorbistagread_process(vorbistagread *v, ffstr *in, ffstr *name
 typedef struct vorbistagwrite {
 	ffvec out;
 	ffuint cnt; // number of entries (including vendor)
+	ffuint left_zone;
 } vorbistagwrite;
+
+static inline void vorbistagwrite_create(vorbistagwrite *v)
+{
+	if (v->left_zone) {
+		ffvec_alloc(&v->out, v->left_zone, 1);
+		v->out.len = v->left_zone;
+	}
+}
 
 /** Free the object data
 Note: invalidates the data returned by vorbistagwrite_fin() */
@@ -137,33 +146,31 @@ static inline void vorbistagwrite_destroy(vorbistagwrite *v)
 	ffvec_free(&v->out);
 }
 
-/** Add an entry.  The first one must be vendor string.
-Return enum VORBISTAGREAD_R */
+/** Add an entry.  The first one must be vendor string. */
 static inline int vorbistagwrite_add_name(vorbistagwrite *v, ffstr name, ffstr val)
 {
 	ffuint n = name.len + 1 + val.len;
 	if (NULL == ffvec_grow(&v->out, 4 + 4 + n, 1))
 		return -1;
 
-	char *d = (char*)v->out.ptr;
-	ffuint i = v->out.len;
+	char *d = (char*)v->out.ptr + v->out.len;
 
 	if (v->cnt == 0) {
 		// vendor
 		*(ffuint*)d = ffint_le_cpu32(val.len);
-		ffmem_copy(&d[4], val.ptr, val.len);
-		i = 4 + val.len + 4;
+		d += 4;
+		d = ffmem_copy(d, val.ptr, val.len);
+		d += 4;
 
 	} else {
-		*(ffuint*)&d[i] = ffint_le_cpu32(n);
-		i += 4;
-		i += ffs_upper(&d[i], -1, name.ptr, name.len);
-		d[i++] = '=';
-		ffmem_copy(&d[i], val.ptr, val.len);
-		i += val.len;
+		*(ffuint*)d = ffint_le_cpu32(n);
+		d += 4;
+		d += ffs_upper(d, -1, name.ptr, name.len);
+		*d++ = '=';
+		d = ffmem_copy(d, val.ptr, val.len);
 	}
 
-	v->out.len = i;
+	v->out.len = d - (char*)v->out.ptr;
 	v->cnt++;
 	return 0;
 }
@@ -187,8 +194,9 @@ Return Vorbis tag data */
 static inline ffstr vorbistagwrite_fin(vorbistagwrite *v)
 {
 	FF_ASSERT(v->cnt != 0);
-	ffuint vendor_len = ffint_le_cpu32_ptr(v->out.ptr);
-	void *p = (char*)v->out.ptr + 4 + vendor_len;
-	*(ffuint*)p = ffint_le_cpu32(v->cnt - 1);
-	return *(ffstr*)&v->out;
+	char *d = (char*)v->out.ptr + v->left_zone;
+	ffuint vendor_len = ffint_le_cpu32_ptr(d);
+	*(ffuint*)(d + 4 + vendor_len) = ffint_le_cpu32(v->cnt - 1);
+	ffstr s = FFSTR_INITN(d, v->out.len - v->left_zone);
+	return s;
 }
