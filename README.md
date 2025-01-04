@@ -4,8 +4,8 @@ avpack is a fast C library that can pack and unpack data to/from the popular mul
 
 avpack code is header-only (`.h`-only) and doesn't need to be built into `.a/.so/.dll` before use - you just include `.h` file and that's all.
 
-avpack is used by fmedia (`github.com/stsaz/fmedia`) - a fast media player/recorder/converter.
-avpack is now the only suitable library for reading and writing multimedia files for the asynchronous and economical file I/O which fmedia implements.
+avpack is used by phiola (https://github.com/stsaz/phiola) - a fast audio player/recorder/converter.
+avpack is the only library for reading and writing multimedia files that is suitable for the highly efficient file I/O implemented in phiola.
 
 Contents:
 
@@ -23,35 +23,35 @@ Contents:
 | Purpose | Include Files |
 | --- | --- |
 | **Audio file formats:** | |
-|  .aac read | [aac-read.h](avpack/aac-read.h) |
-|  .ape read | [ape-read.h](avpack/ape-read.h) |
-|  .avi read | [avi-read.h](avpack/avi-read.h) |
-|  .caf read | [caf-read.h](avpack/caf-read.h) |
-|  .flac read | [flac-read.h](avpack/flac-read.h) |
-|  .mkv read | [mkv-read.h](avpack/mkv-read.h) |
-|  .mp3 read/write | [mp3-read.h](avpack/mp3-read.h), [mp3-write.h](avpack/mp3-write.h) |
+|  .aac read                 | [aac-read.h](avpack/aac-read.h) |
+|  .ape read                 | [ape-read.h](avpack/ape-read.h) |
+|  .avi read                 | [avi-read.h](avpack/avi-read.h) |
+|  .caf read                 | [caf-read.h](avpack/caf-read.h) |
+|  .flac read                | [flac-read.h](avpack/flac-read.h) |
+|  .mkv/.webm read           | [mkv-read.h](avpack/mkv-read.h) |
+|  .mp3 read/write           | [mp3-read.h](avpack/mp3-read.h), [mp3-write.h](avpack/mp3-write.h) |
 |  .mp4/.m4a/.mov read/write | [mp4-read.h](avpack/mp4-read.h), [mp4-write.h](avpack/mp4-write.h) |
-|  .mpc read | [mpc-read.h](avpack/mpc-read.h) |
-|  .ogg(FLAC) read | [flac-ogg-read.h](avpack/flac-ogg-read.h) |
-|  .ogg/.opus read/write | [ogg-read.h](avpack/ogg-read.h), [ogg-write.h](avpack/ogg-write.h) |
-|  .ts read | [ts-read.h](avpack/ts-read.h) |
-|  .wav read/write | [wav-read.h](avpack/wav-read.h), [wav-write.h](avpack/wav-write.h) |
-|  .wv read/write | [wv-read.h](avpack/wv-read.h) |
+|  .mpc read                 | [mpc-read.h](avpack/mpc-read.h) |
+|  .ogg(FLAC) read           | [flac-ogg-read.h](avpack/flac-ogg-read.h) |
+|  .ogg/.opus read/write     | [ogg-read.h](avpack/ogg-read.h), [ogg-write.h](avpack/ogg-write.h) |
+|  .ts read                  | [ts-read.h](avpack/ts-read.h) |
+|  .wav read/write           | [wav-read.h](avpack/wav-read.h), [wav-write.h](avpack/wav-write.h) |
+|  .wv read/write            | [wv-read.h](avpack/wv-read.h) |
 | **Audio streams:** | |
-|  ICY stream read | [icy.h](avpack/icy.h) |
-|  MPEG-1 stream read | [mpeg1-read.h](avpack/mpeg1-read.h) |
+|  ICY stream read           | [icy.h](avpack/icy.h) |
+|  MPEG-1 stream read        | [mpeg1-read.h](avpack/mpeg1-read.h) |
 | **Playlists:** | |
-|  .cue read | [cue.h](avpack/cue.h) |
-|  .m3u read/write | [m3u.h](avpack/m3u.h) |
-|  .pls read | [pls.h](avpack/pls.h) |
+|  .cue read                 | [cue.h](avpack/cue.h) |
+|  .m3u read/write           | [m3u.h](avpack/m3u.h) |
+|  .pls read                 | [pls.h](avpack/pls.h) |
 | **MM Tags:** | |
-|  APETAG read | [apetag.h](avpack/apetag.h) |
-|  ID3v1 & ID3v2 read/write | [id3v1.h](avpack/id3v1.h), [id3v2.h](avpack/id3v2.h) |
-|  Vorbis tags read/write | [vorbistag.h](avpack/vorbistag.h) |
+|  APETAG read               | [apetag.h](avpack/apetag.h) |
+|  ID3v1 & ID3v2 read/write  | [id3v1.h](avpack/id3v1.h), [id3v2.h](avpack/id3v2.h) |
+|  Vorbis tags read/write    | [vorbistag.h](avpack/vorbistag.h) |
 | **Graphics:** | |
-|  .bmp read/write | [bmp-read.h](avpack/bmp-read.h), [bmp-write.h](avpack/bmp-write.h) |
-|  .jpg read | [jpg-read.h](avpack/jpg-read.h) |
-|  .png read | [png-read.h](avpack/png-read.h) |
+|  .bmp read/write           | [bmp-read.h](avpack/bmp-read.h), [bmp-write.h](avpack/bmp-write.h) |
+|  .jpg read                 | [jpg-read.h](avpack/jpg-read.h) |
+|  .png read                 | [png-read.h](avpack/png-read.h) |
 
 It doesn't contain code that reads or writes files - this is user's responsibility.
 
@@ -113,8 +113,3 @@ Each format writer has a similar set of functions:
 	cd avpack/test
 	make
 	./avpack-test all
-
-
-## License
-
-This code is absolutely free.
