@@ -427,7 +427,7 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 			}
 
 			d->txtenc = ID3V2_UTF8;
-			if (d->have_txtenc) {
+			if (!d->as_is && d->have_txtenc) {
 				if (1 > d->chunk.len)
 					return _ID3V2READ_ERR(d, "data too large");
 				d->txtenc = (ffbyte)d->chunk.ptr[0];
@@ -457,10 +457,17 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 			break;
 
 		case R_DATA:
+			ffstr_setz(name, d->frame_id);
+			d->state = R_FR;
+
+			if (d->as_is) {
+				*value = d->chunk;
+				return -(int)d->tag;
+			}
+
 			switch (d->tag) {
 			case MMTAG_COMMENT:
-				if (!d->as_is
-					&& d->chunk.len >= FFS_LEN("LNG\0")) {
+				if (d->chunk.len >= FFS_LEN("LNG\0")) {
 					// skip language, short description and NULL
 					ffstr_shift(&d->chunk, FFS_LEN("LNG"));
 					switch (d->txtenc) {
@@ -478,14 +485,14 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 					}
 				}
 				break;
+
+			case MMTAG_PICTURE:
+				*value = d->chunk;
+				return -(int)d->tag;
 			}
 
-			d->state = R_FR;
-
 			*value = d->chunk;
-			if (!d->as_is
-				&& d->tag != MMTAG_PICTURE
-				&& 0xdeed != (r = _id3v2read_text_decode(d, d->chunk, value)))
+			if (0xdeed != (r = _id3v2read_text_decode(d, d->chunk, value)))
 				return r;
 
 			if (value->len != 0 && *ffslice_lastT(value, char) == '\0')
@@ -517,7 +524,6 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 				break;
 			}
 
-			ffstr_setz(name, d->frame_id);
 			return -(int)d->tag;
 
 		case R_TRKTOTAL:
