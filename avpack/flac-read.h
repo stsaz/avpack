@@ -7,11 +7,11 @@ flacread_open flacread_close
 flacread_process
 flacread_info
 flacread_error
-flacread_tag
 flacread_seek
 flacread_offset
 flacread_cursample
 flacread_samples
+flacread_meta_type flacread_meta_offset
 flacread_finish
 */
 
@@ -22,7 +22,6 @@ fLaC (HDR STREAMINFO) [HDR BLOCK]... (FRAME_HDR SUBFRAME... FRAME_FOOTER)...
 #pragma once
 
 #include <avpack/flac-fmt.h>
-#include <avpack/vorbistag.h>
 #include <avpack/shared.h>
 #include <ffbase/vector.h>
 
@@ -40,12 +39,9 @@ typedef struct flacread {
 	ffbyte first_framehdr[4];
 	ffuint fin;
 	ffuint last_hdr_block;
+	ffuint meta_type;
 
 	struct flac_info info;
-
-	vorbistagread vtag;
-	ffuint tag;
-	ffstr tagname, tagval;
 
 	ffuint frame1_off;
 	ffuint64 seek_sample;
@@ -61,10 +57,10 @@ typedef struct flacread {
 enum FLACREAD_R {
 	FLACREAD_MORE,
 	FLACREAD_DATA,
-	FLACREAD_SEEK,
+	FLACREAD_SEEK, // Use flacread_offset()
 	FLACREAD_DONE,
 	FLACREAD_HEADER,
-	FLACREAD_TAG,
+	FLACREAD_META_BLOCK, // Output whole meta block body. Use flacread_meta_type() and flacread_meta_offset().
 	FLACREAD_HEADER_FIN,
 	FLACREAD_ERROR,
 };
@@ -278,7 +274,7 @@ Return enum FLACREAD_R */
 static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 {
 	enum {
-		I_INFO, I_META_NEXT, I_META, I_TAGS, I_PIC, I_SEEK_TBL,
+		I_INFO, I_META_BLOCK, I_META_NEXT, I_META, I_SEEK_TBL,
 		I_FRAME, I_FRAME_CHK, I_DONE,
 		I_SEEK_OFF, I_SEEK_FRAME,
 		I_GATHER, I_GATHER_SOME,
@@ -320,7 +316,7 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 			if (f->last_hdr_block) {
 				f->gather = 16*1024;
 				f->state = I_FRAME;
-				f->frame1_off = (ffuint)f->off;
+				f->frame1_off = (ffuint)f->off - _avp_stream_used(&f->stream);
 				return FLACREAD_HEADER_FIN;
 			}
 			f->state = I_GATHER,  f->nextstate = I_META,  f->gather = sizeof(struct flac_hdr);
@@ -328,58 +324,24 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 
 		case I_META: {
 			ffuint blksize;
-			r = flac_hdr_read(f->chunk.ptr, &blksize, &f->last_hdr_block);
+			f->meta_type = r = flac_hdr_read(f->chunk.ptr, &blksize, &f->last_hdr_block);
+			_flacr_log(f, "meta block %u size:%u", r, blksize);
 
 			const ffuint MAX_META = 16 * 1024*1024;
-			ffuint next_field_off = f->off - f->chunk.len + sizeof(struct flac_hdr) + blksize;
-			if (next_field_off > MAX_META)
+			if (blksize > MAX_META)
 				return _FLACR_ERR(f, "too large meta");
 
-			f->state = I_META_NEXT;
-
-			switch (r) {
-			case FLAC_TSEEKTABLE:
-				f->state = I_GATHER,  f->nextstate = I_SEEK_TBL,  f->gather = blksize;
-				continue;
-
-			case FLAC_TTAGS:
-				f->state = I_GATHER,  f->nextstate = I_TAGS,  f->gather = blksize;
-				continue;
-
-			case FLAC_TPIC:
-				f->state = I_GATHER,  f->nextstate = I_PIC,  f->gather = blksize;
-				continue;
-			}
-
-			_avp_stream_reset(&f->stream);
-			f->off = next_field_off;
-			return FLACREAD_SEEK; // skip meta block
+			f->state = I_GATHER,  f->nextstate = I_META_BLOCK,  f->gather = blksize;
+			continue;
 		}
 
-		case I_TAGS:
-			r = vorbistagread_process(&f->vtag, &f->chunk, &f->tagname, &f->tagval);
-			switch (r) {
-			case VORBISTAGREAD_DONE:
-				f->state = I_META_NEXT;
-				continue;
-			case VORBISTAGREAD_ERROR:
-				f->state = I_META_NEXT;
-				_flacr_log(f, "bad Vorbis tags");
-				continue;
-			}
-
-			f->tag = r;
-			return FLACREAD_TAG;
-
-		case I_PIC:
-			if (0 != (r = flac_meta_pic(f->chunk, &f->tagval))) {
-				f->state = I_META_NEXT;
-				_flacr_log(f, "bad picture");
-			}
-			f->tag = MMTAG_PICTURE;
-			ffstr_setz(&f->tagname, "picture");
+		case I_META_BLOCK:
+			f->chunk.len = f->gather;
+			*output = f->chunk;
 			f->state = I_META_NEXT;
-			return FLACREAD_TAG;
+			if (f->meta_type == FLAC_TSEEKTABLE)
+				f->state = I_SEEK_TBL;
+			return FLACREAD_META_BLOCK;
 
 		case I_SEEK_TBL:
 			f->state = I_META_NEXT;
@@ -505,10 +467,7 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 #undef _FLACR_ERR
 
 /** Get an absolute file offset to seek */
-static inline ffuint64 flacread_offset(flacread *f)
-{
-	return f->off;
-}
+#define flacread_offset(f)  ((f)->off)
 
 #define flacread_finish(f)  ((f)->fin = 1)
 
@@ -517,14 +476,11 @@ static inline const struct flac_info* flacread_info(flacread *f)
 	return &f->info;
 }
 
-/**
-Return enum MMTAG */
-static inline int flacread_tag(flacread *f, ffstr *name, ffstr *val)
-{
-	*name = f->tagname;
-	*val = f->tagval;
-	return f->tag;
-}
+/** Return enum FLAC_TYPE */
+#define flacread_meta_type(f)  ((f)->meta_type)
+
+/** File offset at meta block header */
+#define flacread_meta_offset(f)  ((f)->off - _avp_stream_used(&(f)->stream) - sizeof(struct flac_hdr) - (f)->chunk.len)
 
 /** Get an absolute sample number */
 #define flacread_cursample(f)  ((f)->frame.pos)
