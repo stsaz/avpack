@@ -42,6 +42,7 @@ static const ffbyte _vorbistag_mmtag[] = {
 	MMTAG_GENRE,
 	MMTAG_LYRICS,
 	MMTAG_PUBLISHER,
+	MMTAG_REPLAYGAIN_TRACK_GAIN,
 	MMTAG_TITLE,
 	MMTAG_TRACKTOTAL,
 	MMTAG_TRACKNO,
@@ -60,6 +61,7 @@ static const char *const _vorbistag_str[] = {
 	"GENRE",
 	"LYRICS",
 	"PUBLISHER",
+	"REPLAYGAIN_TRACK_GAIN",
 	"TITLE",
 	"TOTALTRACKS", // =TRACKTOTAL
 	"TRACKNUMBER",

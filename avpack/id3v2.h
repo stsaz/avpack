@@ -74,6 +74,7 @@ static const char id3v2_frame_str_v24[][4] = {
 	[MMTAG_GENRE] =			"TCON",
 	[MMTAG_PICTURE] =		"APIC",
 	[MMTAG_PUBLISHER] =		"TPUB",
+	[MMTAG_REPLAYGAIN_TRACK_GAIN] = "TXXX",
 	[MMTAG_TITLE] =			"TIT2",
 	[MMTAG_TRACKNO] =		"TRCK",
 };
@@ -491,6 +492,16 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 				value->len--;
 
 			switch (d->tag) {
+			case MMTAG_UNKNOWN:
+				if (!ffmem_cmp(d->frame_id, "TXXX", 4)) { // TXXX ... name \0 value
+					ffstr k, v;
+					if (ffstr_splitby(value, '\0', &k, &v) > 0) {
+						*name = k;
+						*value = v;
+					}
+				}
+				break;
+
 			case MMTAG_TRACKNO:
 				if (ffstr_splitby(value, '/', value, &d->chunk) >= 0)
 					d->state = R_TRKTOTAL;
@@ -629,6 +640,11 @@ static inline int id3v2write_add(struct id3v2write *w, ffuint id, ffstr data)
 			return 0; // waiting for MMTAG_TRACKNO
 		data = _id3v2_trackno(w);
 		id = MMTAG_TRACKNO;
+		break;
+
+	case MMTAG_REPLAYGAIN_TRACK_GAIN:
+		prefix.ptr = buf;
+		prefix.len = ffmem_ncopy(buf, sizeof(buf), "REPLAYGAIN_TRACK_GAIN", 21+1);
 		break;
 	}
 
