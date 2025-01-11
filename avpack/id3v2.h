@@ -566,9 +566,9 @@ static inline void id3v2write_close(struct id3v2write *w)
 	ffvec_free(&w->buf);
 }
 
-static int _id3v2write_addframe(struct id3v2write *w, const char *id, ffstr prefix, ffstr data, ffuint flags)
+static int _id3v2write_addframe(struct id3v2write *w, const char *id, ffstr prefix, ffstr data, int encoding)
 {
-	ffsize n = sizeof(struct id3v2_framehdr) + 1 + prefix.len + data.len;
+	ffsize n = sizeof(struct id3v2_framehdr) + !!(encoding >= 0) + prefix.len + data.len;
 
 	if (NULL == ffvec_grow(&w->buf, n, 1))
 		return -1;
@@ -581,8 +581,8 @@ static int _id3v2write_addframe(struct id3v2write *w, const char *id, ffstr pref
 	fr->flags[0] = 0,  fr->flags[1] = 0;
 	p += sizeof(*fr);
 
-	if (flags & 1)
-		*p++ = ID3V2_UTF8;
+	if (encoding >= 0)
+		*p++ = encoding;
 
 	p = ffmem_copy(p, prefix.ptr, prefix.len);
 	ffmem_copy(p, data.ptr, data.len);
@@ -616,21 +616,21 @@ Return 0 on success
 static inline int id3v2write_add(struct id3v2write *w, ffuint id, ffstr data)
 {
 	ffstr prefix = {};
-	char prefix_buf[4];
-	ffuint flags = 1;
+	char buf[32];
+	int txt_enc = ID3V2_UTF8;
 
 	switch (id) {
 	case MMTAG_COMMENT:
 		if (!w->as_is) {
-			ffmem_copy(prefix_buf, "eng\0", 4);
-			ffstr_set(&prefix, prefix_buf, 4);
+			ffmem_copy(buf, "eng\0", 4);
+			ffstr_set(&prefix, buf, 4);
 		}
 		break;
 
 	case MMTAG_PICTURE:
 		if (!w->as_is)
 			return 1; // not implemented
-		flags = 0;
+		txt_enc = -1;
 		break;
 
 	case MMTAG_TRACKNO:
@@ -658,7 +658,7 @@ static inline int id3v2write_add(struct id3v2write *w, ffuint id, ffstr data)
 		|| id3v2_frame_str_v24[id][0] == '\0')
 		return 1; // tag id not supported
 
-	int r = _id3v2write_addframe(w, id3v2_frame_str_v24[id], prefix, data, flags);
+	int r = _id3v2write_addframe(w, id3v2_frame_str_v24[id], prefix, data, txt_enc);
 	if (r != 0)
 		return r;
 
