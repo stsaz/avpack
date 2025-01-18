@@ -118,7 +118,7 @@ static inline int mp3write_process(mp3write *m, ffstr *input, ffstr *output, int
 
 			struct _mp3write_tag *t;
 			FFSLICE_WALK(&m->tags, t) {
-				int r = id3v2write_add(&id3, t->mmtag, t->val);
+				int r = id3v2write_add(&id3, t->mmtag, t->val, 0);
 				if (r < 0)
 					return MP3WRITE_ERROR; // not enough memory
 				else if (r > 0)

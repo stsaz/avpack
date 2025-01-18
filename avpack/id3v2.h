@@ -8,7 +8,7 @@ id3v2read_process
 id3v2read_error
 id3v2read_size
 id3v2write_create id3v2write_close
-id3v2write_add
+id3v2write_add id3v2write_add_txxx
 id3v2write_finish
 */
 
@@ -22,62 +22,9 @@ PADDING
 
 #include <avpack/id3v1.h>
 #include <avpack/mmtag.h>
+#include <avpack/shared.h>
 #include <ffbase/vector.h>
 #include <ffbase/unicode.h>
-
-static const ffbyte id3v2_frame_int[] = {
-	MMTAG_PICTURE,
-	MMTAG_COMMENT,
-	MMTAG_COMMENT,
-	MMTAG_PICTURE,
-	MMTAG_ALBUM,
-	MMTAG_ALBUM,
-	MMTAG_GENRE,
-	MMTAG_GENRE,
-	MMTAG_TITLE,
-	MMTAG_ARTIST,
-	MMTAG_ARTIST,
-	MMTAG_ALBUMARTIST,
-	MMTAG_PUBLISHER,
-	MMTAG_TRACKNO,
-	MMTAG_TRACKNO,
-	MMTAG_TITLE,
-	MMTAG_DATE,
-	MMTAG_DATE,
-};
-static const char id3v2_frame_str[][4] = {
-	"APIC", // MMTAG_PICTURE // "MIME" \0 TYPE[1] "DESCRIPTION" \0 DATA[]
-	"COM\0", // MMTAG_COMMENT
-	"COMM", // MMTAG_COMMENT // "LNG"[3] "SHORT" \0 "TEXT"
-	"PIC\0", // MMTAG_PICTURE
-	"TAL\0", // MMTAG_ALBUM
-	"TALB", // MMTAG_ALBUM
-	"TCO\0", // MMTAG_GENRE
-	"TCON", // MMTAG_GENRE // "Genre" | "(NN)Genre" | "(NN)" where NN is ID3v1 genre index
-	"TIT2", // MMTAG_TITLE
-	"TP1\0", // MMTAG_ARTIST
-	"TPE1", // MMTAG_ARTIST
-	"TPE2", // MMTAG_ALBUMARTIST
-	"TPUB", // MMTAG_PUBLISHER
-	"TRCK", // MMTAG_TRACKNO // "N[/TOTAL]"
-	"TRK\0", // MMTAG_TRACKNO
-	"TT2\0", // MMTAG_TITLE
-	"TYE\0", // MMTAG_DATE
-	"TYER", // MMTAG_DATE
-};
-static const char id3v2_frame_str_v24[][4] = {
-	[MMTAG_ALBUM] =			"TALB",
-	[MMTAG_ALBUMARTIST] =	"TPE2",
-	[MMTAG_ARTIST] =		"TPE1",
-	[MMTAG_COMMENT] =		"COMM",
-	[MMTAG_DATE] =			"TYER",
-	[MMTAG_GENRE] =			"TCON",
-	[MMTAG_PICTURE] =		"APIC",
-	[MMTAG_PUBLISHER] =		"TPUB",
-	[MMTAG_REPLAYGAIN_TRACK_GAIN] = "TXXX",
-	[MMTAG_TITLE] =			"TIT2",
-	[MMTAG_TRACKNO] =		"TRCK",
-};
 
 struct id3v2_hdr {
 	char id3[3]; // "ID3"
@@ -95,6 +42,7 @@ struct id3v2_framehdr {
 	char id[4];
 	ffbyte size[4]; // v2.4: 7-bit bytes
 	ffbyte flags[2]; // [1]: enum ID3V2_FRAME_F
+	// unused[4] // if ID3V2_FRAME_DATALEN
 	// ffbyte text_encoding; // enum ID3V2_TXTENC - for ID starting with 'T' or 'COM', or 'APIC'
 };
 
@@ -126,9 +74,8 @@ static inline void _id3v2_int7_write(void *dst, ffuint i)
 }
 
 /** Decode integer */
-static inline ffuint _id3v2_int7_read(const void *src)
+static inline unsigned _id3v2_int7_read(unsigned i)
 {
-	ffuint i = ffint_be_cpu32_ptr(src);
 	return ((i & 0x7f000000) >> 3)
 		| ((i & 0x007f0000) >> 2)
 		| ((i & 0x00007f00) >> 1)
@@ -139,36 +86,37 @@ static inline ffuint _id3v2_int7_read(const void *src)
 struct id3v2read {
 	ffuint state, nextstate;
 	ffsize gather_size;
-	ffvec buf, unsync_buf;
+	struct avp_stream stm;
+	ffvec unsync_buf, text_buf;
 	ffstr chunk;
+	ffuint offset;
 
 	ffuint ver;
 	ffuint total_size;
-	ffuint tagsize;
+	ffuint hdr_flags;
+
 	ffuint tag; // enum MMTAG
+	ffuint body_off;
 	ffuint txtenc;
-	ffuint have_txtenc;
-	ffuint frame_size;
-	ffuint hdrflags;
 	ffuint frame_flags;
 	const char *error;
 	char error_s[200];
 	char frame_id[5];
 
 	ffuint codepage;
-	ffuint as_is; // don't decode/convert values
+	ffuint as_is; // return whole frames as-is
 };
 
 static inline void id3v2read_open(struct id3v2read *d)
 {
-	ffvec_alloc(&d->buf, 1024, 1);
 	d->codepage = FFUNICODE_WIN1252;
 }
 
 static inline void id3v2read_close(struct id3v2read *d)
 {
-	ffvec_free(&d->buf);
+	_avp_stream_free(&d->stm);
 	ffvec_free(&d->unsync_buf);
+	ffvec_free(&d->text_buf);
 }
 
 enum ID3V2READ_R {
@@ -197,6 +145,45 @@ static inline const char* id3v2read_error(struct id3v2read *d)
 	return d->error_s;
 }
 
+static int _id3v2r_hdr_read(struct id3v2read *d, ffstr data, unsigned *hdr_len)
+{
+	if (sizeof(struct id3v2_hdr) + 4 > data.len)
+		return ID3V2READ_ERROR;
+	const struct id3v2_hdr *h = (struct id3v2_hdr*)data.ptr;
+	unsigned n = ffint_be_cpu32_ptr(h->size);
+
+	if (!(!ffmem_cmp(h->id3, "ID3", 3)
+		&& (n & 0x80808080) == 0))
+		return ID3V2READ_NO;
+
+	d->total_size = sizeof(struct id3v2_hdr) + _id3v2_int7_read(n);
+	d->ver = h->ver[0];
+	d->hdr_flags = h->flags;
+
+	switch (d->ver) {
+	case 3:
+		if ((h->flags & ~(ID3V2_HDR_UNSYNC | ID3V2_HDR_EXT)) != 0)
+			return ID3V2READ_NO; // header flags not supported
+
+		if (h->flags & ID3V2_HDR_EXT) {
+			*hdr_len = sizeof(struct id3v2_hdr) + 4 + ffint_be_cpu32_ptr(h + 1);
+			return ID3V2READ_MORE;
+		}
+		break;
+
+	case 2:
+	case 4:
+		if ((h->flags & ~ID3V2_HDR_UNSYNC) != 0)
+			return ID3V2READ_NO; // header flags not supported
+		break;
+
+	default:
+		return ID3V2READ_NO; // version not supported
+	}
+
+	return 0;
+}
+
 /** Replace: FF 00 -> FF */
 static void _id3v2read_unsync(ffvec *buf, ffstr in)
 {
@@ -221,40 +208,119 @@ static void _id3v2read_unsync(ffvec *buf, ffstr in)
 	}
 }
 
-static int _id3v2read_frame_read(struct id3v2read *d, ffstr in, ffuint *framesize)
+static int _id3v2r_frame_read(struct id3v2read *d, ffstr in, ffuint *framesize)
 {
-	int tag = MMTAG_UNKNOWN;
-	d->have_txtenc = 0;
+	static const char id3v2_frame_str[][4] = {
+		"APIC", // MMTAG_PICTURE // "MIME" \0 TYPE[1] "DESCRIPTION" \0 DATA[]
+		"COMM", // MMTAG_COMMENT
+		"TALB", // MMTAG_ALBUM
+		"TCOM", // MMTAG_COMPOSER
+		"TCON", // MMTAG_GENRE // "Genre" | "(NN)Genre" | "(NN)" where NN is ID3v1 genre index
+		"TCOP", // MMTAG_COPYRIGHT
+		"TIT2", // MMTAG_TITLE
+		"TPE1", // MMTAG_ARTIST
+		"TPE2", // MMTAG_ALBUMARTIST
+		"TPUB", // MMTAG_PUBLISHER
+		"TRCK", // MMTAG_TRACKNO // "N[/TOTAL]"
+		"TYER", // MMTAG_DATE
+		"USLT", // MMTAG_LYRICS
+	};
+	static const char id3v2_frame_int[] = {
+		MMTAG_PICTURE,
+		MMTAG_COMMENT,
+		MMTAG_ALBUM,
+		MMTAG_COMPOSER,
+		MMTAG_GENRE,
+		MMTAG_COPYRIGHT,
+		MMTAG_TITLE,
+		MMTAG_ARTIST,
+		MMTAG_ALBUMARTIST,
+		MMTAG_PUBLISHER,
+		MMTAG_TRACKNO,
+		MMTAG_DATE,
+		MMTAG_LYRICS,
+	};
 
-	if (d->ver == 2) {
-		const struct id3v22_framehdr *f = (struct id3v22_framehdr*)in.ptr;
-		*framesize = ffint_be_cpu24_ptr(f->size);
-		ffsz_copyn(d->frame_id, sizeof(d->frame_id), f->id, 3);
+	static const char id3v22_frame_str[][4] = {
+		"COM\0", // MMTAG_COMMENT
+		"PIC\0", // MMTAG_PICTURE
+		"TAL\0", // MMTAG_ALBUM
+		"TCO\0", // MMTAG_GENRE
+		"TP1\0", // MMTAG_ARTIST
+		"TRK\0", // MMTAG_TRACKNO
+		"TT2\0", // MMTAG_TITLE
+		"TYE\0", // MMTAG_DATE
+	};
+	static const char id3v22_frame_int[] = {
+		MMTAG_COMMENT,
+		MMTAG_PICTURE,
+		MMTAG_ALBUM,
+		MMTAG_GENRE,
+		MMTAG_ARTIST,
+		MMTAG_TRACKNO,
+		MMTAG_TITLE,
+		MMTAG_DATE,
+	};
 
-	} else {
-		const struct id3v2_framehdr *f = (struct id3v2_framehdr*)in.ptr;
-		ffsz_copyn(d->frame_id, sizeof(d->frame_id), f->id, 4);
+	const struct id3v2_framehdr *f = (struct id3v2_framehdr*)in.ptr;
+	const void *frames = id3v2_frame_str;
+	const char *tags = id3v2_frame_int;
+	unsigned i, hdr_len = sizeof(struct id3v2_framehdr), n, n_frames = FF_COUNT(id3v2_frame_str);
+	i = hdr_len;
+	ffmem_copy(d->frame_id, in.ptr, 4);
+	n = ffint_be_cpu32_ptr(in.ptr + 4);
+	d->frame_flags = f->flags[1];
 
-		if (d->ver == 3) {
-			*framesize = ffint_be_cpu32_ptr(f->size);
-			if (f->flags[1] != 0)
-				return _ID3V2READ_ERR(d, "v3 frame flags not supported");
+	switch (d->ver) {
+	case 2:
+		hdr_len = sizeof(struct id3v22_framehdr);
+		ffmem_copy(d->frame_id, in.ptr, 3);
+		n = ffint_be_cpu24_ptr(in.ptr + 3);
+		frames = id3v22_frame_str;
+		n_frames = FF_COUNT(id3v22_frame_str);
+		tags = id3v22_frame_int;
+		break;
 
-		} else {
-			*framesize = _id3v2_int7_read(f->size);
-			if ((f->flags[1] & ~(ID3V2_FRAME_DATALEN | ID3V2_FRAME_UNSYNC)) != 0)
-				return _ID3V2READ_ERR(d, "frame flags not supported");
-			d->frame_flags = f->flags[1];
+	case 3:
+		if (n & 0x80000000)
+			return _ID3V2READ_ERR(d, "corrupt data");
+
+		if (d->frame_flags)
+			return _ID3V2READ_ERR(d, "v3 frame flags not supported");
+		break;
+
+	case 4:
+		if (n & 0x80808080)
+			return _ID3V2READ_ERR(d, "corrupt data");
+		n = _id3v2_int7_read(n);
+
+		if (d->frame_flags & ~(ID3V2_FRAME_DATALEN | ID3V2_FRAME_UNSYNC))
+			return _ID3V2READ_ERR(d, "frame flags not supported");
+
+		if (d->frame_flags & ID3V2_FRAME_DATALEN) {
+			if (4 > n || i + 4 > in.len)
+				return _ID3V2READ_ERR(d, "corrupt data");
+			i += 4;
 		}
+		break;
 	}
 
-	int i = ffcharr_findsorted(id3v2_frame_str, FF_COUNT(id3v2_frame_str), sizeof(id3v2_frame_str[0]), d->frame_id, 4);
-	if (i >= 0)
-		tag = id3v2_frame_int[i];
+	int r = ffcharr_findsorted(frames, n_frames, 4, d->frame_id, 4);
+	int tag = MMTAG_UNKNOWN;
+	if (r >= 0)
+		tag = tags[r];
 
-	if (in.ptr[0] == 'T' || tag == MMTAG_COMMENT)
-		d->have_txtenc = 1;
+	d->txtenc = ID3V2_UTF8;
+	if (d->frame_id[0] == 'T'
+		|| tag == MMTAG_COMMENT || tag == MMTAG_LYRICS || tag == MMTAG_PICTURE) {
+		if (i - hdr_len + 1 > n || i + 1 > in.len)
+			return _ID3V2READ_ERR(d, "corrupt data");
+		d->txtenc = (ffbyte)in.ptr[i];
+		i++;
+	}
 
+	d->body_off = i;
+	*framesize = hdr_len + n;
 	return -tag;
 }
 
@@ -262,14 +328,13 @@ static int _id3v2read_text_decode(struct id3v2read *d, ffstr in, ffstr *out)
 {
 	int r;
 	ffsize n;
-	ffvec *b = &d->unsync_buf;
+	ffvec *b = &d->text_buf;
 	switch (d->txtenc) {
 	case ID3V2_UTF8:
 		n = ffutf8_from_utf8(NULL, 0, in.ptr, in.len, 0);
 		if (NULL == ffvec_realloc(b, n, 1))
 			return _ID3V2READ_WARN(d, "not enough memory");
 		b->len = ffutf8_from_utf8(b->ptr, b->cap, in.ptr, in.len, 0);
-		ffstr_setstr(out, b);
 		break;
 
 	case ID3V2_ANSI:
@@ -277,7 +342,6 @@ static int _id3v2read_text_decode(struct id3v2read *d, ffstr in, ffstr *out)
 		if (NULL == ffvec_realloc(b, n, 1))
 			return _ID3V2READ_WARN(d, "not enough memory");
 		b->len = ffutf8_from_cp(b->ptr, b->cap, in.ptr, in.len, d->codepage);
-		ffstr_setstr(out, b);
 		break;
 
 	case ID3V2_UTF16BOM: {
@@ -291,7 +355,6 @@ static int _id3v2read_text_decode(struct id3v2read *d, ffstr in, ffstr *out)
 		if (NULL == ffvec_realloc(b, n, 1))
 			return _ID3V2READ_WARN(d, "not enough memory");
 		b->len = ffutf8_from_utf16(b->ptr, b->cap, in.ptr, in.len, r);
-		ffstr_setstr(out, b);
 		break;
 	}
 
@@ -300,24 +363,51 @@ static int _id3v2read_text_decode(struct id3v2read *d, ffstr in, ffstr *out)
 		if (NULL == ffvec_realloc(b, n, 1))
 			return _ID3V2READ_WARN(d, "not enough memory");
 		b->len = ffutf8_from_utf16(b->ptr, b->cap, in.ptr, in.len, FFUNICODE_UTF16BE);
-		ffstr_setstr(out, b);
 		break;
 
 	default:
 		return _ID3V2READ_WARN(d, "invalid encoding");
 	}
 
-	return 0xdeed;
+	ffstr_setstr(out, b);
+	return 0;
 }
 
-/** Read next ID3v2 tag field
+/** "LNG"[3] "DESCRIPTION" \0 "TEXT" */
+static void _id3v2read_comment_parse(ffstr data, unsigned encoding, ffstr *body)
+{
+	int r;
+	if (data.len < FFS_LEN("LNG\0"))
+		goto end;
+
+	ffstr_shift(&data, FFS_LEN("LNG"));
+	switch (encoding) {
+	case ID3V2_UTF8:
+	case ID3V2_ANSI:
+		if ((r = ffstr_findchar(&data, '\0')) >= 0)
+			ffstr_shift(&data, r + 1);
+		break;
+
+	case ID3V2_UTF16BOM:
+	case ID3V2_UTF16BE:
+		if ((r = ffutf16_findchar(data.ptr, data.len, '\0')) >= 0)
+			ffstr_shift(&data, r + 2);
+		break;
+	}
+
+end:
+	*body = data;
+}
+
+/** Read next ID3v2 tag field.
+IMPORTANT: some input data may be kept in cache (read with _avp_stream_view(&d->stm)).
 Return >0: enum ID3V2READ_R
- <=0: enum MMTAG */
+	<=0: enum MMTAG */
 static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *name, ffstr *value)
 {
 	enum {
-		R_INIT, R_GATHER, R_HDR, R_EXTHDR_SIZE, R_EXTHDR,
-		R_FR, R_FRHDR, R_FRDATA,
+		R_INIT, R_GATHER, R_HDR, R_HDR_EXT,
+		R_FR, R_FR_HDR, R_FR_DATA,
 		R_UNSYNC,
 		R_DATA, R_TRKTOTAL, R_PADDING,
 	};
@@ -327,136 +417,88 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 	for (;;) {
 		switch (d->state) {
 		case R_INIT:
-			d->gather_size = sizeof(struct id3v2_hdr);
-			d->state = R_GATHER,  d->nextstate = R_HDR;
-			break;
+			d->state = R_GATHER,  d->nextstate = R_HDR,  d->gather_size = sizeof(struct id3v2_hdr) + 4;
+			// fallthrough
 
 		case R_GATHER:
-			r = ffstr_gather((ffstr*)&d->buf, &d->buf.cap, input->ptr, input->len, d->gather_size, &d->chunk);
-			if (r < 0)
+			if (d->total_size && d->offset + d->gather_size > d->total_size)
+				return _ID3V2READ_ERR(d, "corrupt data");
+			if (_avp_stream_realloc(&d->stm, d->gather_size))
 				return _ID3V2READ_ERR(d, "not enough memory");
+			r = _avp_stream_gather(&d->stm, *input, d->gather_size, &d->chunk);
 			ffstr_shift(input, r);
-			if (d->chunk.len == 0 && d->gather_size != 0)
+			if (d->chunk.len < d->gather_size)
 				return ID3V2READ_MORE;
-			d->buf.len = 0;
+			d->chunk.len = d->gather_size;
 			d->state = d->nextstate;
-			break;
+			continue;
 
-		case R_HDR: {
-			const struct id3v2_hdr *h = (struct id3v2_hdr*)d->chunk.ptr;
-			n = *(ffuint*)h->size;
-
-			if (!(!ffmem_cmp(h->id3, "ID3", 3)
-				&& (n & 0x80808080) == 0))
-				return ID3V2READ_NO;
-
-			d->tagsize = _id3v2_int7_read(h->size);
-			d->total_size = d->tagsize + sizeof(struct id3v2_hdr);
-			d->ver = h->ver[0];
-			d->hdrflags = h->flags;
-
-			if (!(d->ver >= 2 && d->ver <= 4))
-				return _ID3V2READ_ERR(d, "version not supported");
-
-			if ((d->ver == 3 && (h->flags & ~(ID3V2_HDR_UNSYNC | ID3V2_HDR_EXT)) != 0)
-				|| (d->ver != 3 && (h->flags & ~ID3V2_HDR_UNSYNC) != 0)) {
-				return _ID3V2READ_ERR(d, "header flags not supported");
+		case R_HDR:
+			if ((r = _id3v2r_hdr_read(d, d->chunk, &n))) {
+				if (r == ID3V2READ_MORE) {
+					d->state = R_GATHER,  d->nextstate = R_HDR_EXT,  d->gather_size = n;
+					continue;
+				}
+				return r;
 			}
 
-			if (d->ver == 3 && (h->flags & ID3V2_HDR_EXT)) {
-				if (4 > d->tagsize)
-					return _ID3V2READ_ERR(d, "data too large");
-				d->tagsize -= 4;
-				d->gather_size = 4;
-				d->state = R_GATHER,  d->nextstate = R_EXTHDR_SIZE;
-				break;
-			}
-
+			ffstr_shift(&d->chunk, sizeof(struct id3v2_hdr));
+			_avp_stream_consume(&d->stm, sizeof(struct id3v2_hdr));
+			d->offset += sizeof(struct id3v2_hdr);
 			d->state = R_FR;
-			break;
-		}
+			continue;
 
-		case R_EXTHDR_SIZE:
-			n = ffint_be_cpu32_ptr(d->chunk.ptr);
-			if (n > d->tagsize)
-				return _ID3V2READ_ERR(d, "data too large");
-			d->tagsize -= n;
-			d->gather_size = n;
-			d->state = R_GATHER,  d->nextstate = R_EXTHDR;
-			break;
-		case R_EXTHDR:
+		case R_HDR_EXT:
+			ffstr_shift(&d->chunk, d->gather_size);
+			_avp_stream_consume(&d->stm, d->gather_size);
+			d->offset += d->gather_size;
 			d->state = R_FR;
-			break;
+			continue;
 
 		case R_FR:
-			if (d->tagsize == 0)
+			if (d->offset == d->total_size)
 				return ID3V2READ_DONE;
-			if (input->len == 0)
-				return ID3V2READ_MORE;
-			if (input->ptr[0] == '\0') {
+
+			d->gather_size = ffmin(sizeof(struct id3v2_framehdr) + 4+1, d->total_size - d->offset);
+			d->state = R_GATHER,  d->nextstate = R_FR_HDR;
+			continue;
+
+		case R_FR_HDR:
+			if (d->chunk.ptr[0] == '\0') {
+				n = ffmin(_avp_stream_used(&d->stm), d->total_size - d->offset);
+				_avp_stream_consume(&d->stm, n);
+				d->offset += n;
 				d->state = R_PADDING;
-				break;
+				continue;
 			}
 
-			n = (d->ver == 2) ? sizeof(struct id3v22_framehdr) : sizeof(struct id3v2_framehdr);
-			if (n > d->tagsize)
-				return _ID3V2READ_ERR(d, "data too large");
-			d->tagsize -= n;
-			d->gather_size = n;
-			d->state = R_GATHER,  d->nextstate = R_FRHDR;
-			break;
-
-		case R_FRHDR:
-			if ((r = _id3v2read_frame_read(d, d->chunk, &n)) > 0)
+			if ((r = _id3v2r_frame_read(d, d->chunk, &n)) > 0)
 				return r;
 			d->tag = -r;
+			d->state = R_GATHER,  d->nextstate = R_FR_DATA,  d->gather_size = n;
+			continue;
 
-			if (n > d->tagsize)
-				return _ID3V2READ_ERR(d, "data too large");
-			d->frame_size = n;
-
-			d->gather_size = n;
-			d->state = R_GATHER,  d->nextstate = R_FRDATA;
-			break;
-
-		case R_FRDATA:
-			if (d->frame_flags & ID3V2_FRAME_DATALEN) {
-				if (4 > d->chunk.len)
-					return _ID3V2READ_ERR(d, "data too large");
-				ffstr_shift(&d->chunk, 4);
-			}
-
-			d->txtenc = ID3V2_UTF8;
-			if (!d->as_is && d->have_txtenc) {
-				if (1 > d->chunk.len)
-					return _ID3V2READ_ERR(d, "data too large");
-				d->txtenc = (ffbyte)d->chunk.ptr[0];
-				ffstr_shift(&d->chunk, 1);
-			}
-			d->tagsize -= d->frame_size;
-
-			if ((d->frame_flags & ID3V2_FRAME_UNSYNC) || (d->hdrflags & ID3V2_HDR_UNSYNC)) {
+		case R_FR_DATA:
+			if ((d->frame_flags & ID3V2_FRAME_UNSYNC) || (d->hdr_flags & ID3V2_HDR_UNSYNC)) {
 				d->unsync_buf.len = 0;
-				if (NULL == ffvec_grow(&d->unsync_buf, d->frame_size, 1))
+				if (NULL == ffvec_grow(&d->unsync_buf, d->gather_size, 1))
 					return _ID3V2READ_ERR(d, "not enough memory");
 				d->state = R_UNSYNC;
-				break;
+				continue;
 			}
 
 			d->state = R_DATA;
-			break;
+			continue;
 
 		case R_UNSYNC:
 			_id3v2read_unsync(&d->unsync_buf, d->chunk);
-			ffvec_free(&d->buf);
-			d->buf = d->unsync_buf;
-			ffvec_null(&d->unsync_buf);
-			ffstr_setstr(&d->chunk, &d->buf);
-			d->buf.len = 0;
+			d->chunk = *(ffstr*)&d->unsync_buf;
 			d->state = R_DATA;
-			break;
+			// fallthrough
 
 		case R_DATA:
+			_avp_stream_consume(&d->stm, d->gather_size);
+			d->offset += d->gather_size;
 			ffstr_setz(name, d->frame_id);
 			d->state = R_FR;
 
@@ -465,37 +507,23 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 				return -(int)d->tag;
 			}
 
+			ffstr_shift(&d->chunk, d->body_off);
+
 			switch (d->tag) {
 			case MMTAG_COMMENT:
-				if (d->chunk.len >= FFS_LEN("LNG\0")) {
-					// skip language, short description and NULL
-					ffstr_shift(&d->chunk, FFS_LEN("LNG"));
-					switch (d->txtenc) {
-					case ID3V2_UTF8:
-					case ID3V2_ANSI:
-						if ((r = ffstr_findchar(&d->chunk, '\0')) >= 0)
-							ffstr_shift(&d->chunk, r + 1);
-						break;
-
-					case ID3V2_UTF16BOM:
-					case ID3V2_UTF16BE:
-						if ((r = ffutf16_findchar(d->chunk.ptr, d->chunk.len, '\0')) >= 0)
-							ffstr_shift(&d->chunk, r + 2);
-						break;
-					}
-				}
-				break;
+			case MMTAG_LYRICS:
+				_id3v2read_comment_parse(d->chunk, d->txtenc, &d->chunk);  break;
 
 			case MMTAG_PICTURE:
 				*value = d->chunk;
-				return -(int)d->tag;
+				return -MMTAG_PICTURE;
 			}
 
 			*value = d->chunk;
-			if (0xdeed != (r = _id3v2read_text_decode(d, d->chunk, value)))
+			if ((r = _id3v2read_text_decode(d, d->chunk, value)))
 				return r;
 
-			if (value->len != 0 && *ffslice_lastT(value, char) == '\0')
+			if (value->len && value->ptr[value->len - 1] == '\0')
 				value->len--;
 
 			switch (d->tag) {
@@ -533,13 +561,13 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 			return -MMTAG_TRACKTOTAL;
 
 		case R_PADDING:
-			if (d->tagsize == 0)
+			if (d->offset == d->total_size)
 				return ID3V2READ_DONE;
 			if (input->len == 0)
 				return ID3V2READ_MORE;
-			n = ffmin(d->tagsize, input->len);
+			n = ffmin(d->total_size - d->offset, input->len);
 			ffstr_shift(input, n);
-			d->tagsize -= n;
+			d->offset += n;
 			break;
 		}
 	}
@@ -552,7 +580,6 @@ struct id3v2write {
 	ffvec buf;
 	char trackno[32];
 	char tracktotal[32];
-	ffuint as_is; // don't encode comment and picture
 };
 
 static inline void id3v2write_create(struct id3v2write *w)
@@ -613,24 +640,24 @@ static ffstr _id3v2_trackno(struct id3v2write *w)
 Return 0 on success
  >0 if tag field isn't supported
  <0 on error */
-static inline int id3v2write_add(struct id3v2write *w, ffuint id, ffstr data)
+static inline int id3v2write_add(struct id3v2write *w, ffuint id, ffstr data, unsigned as_is)
 {
 	ffstr prefix = {};
 	char buf[32];
-	int txt_enc = ID3V2_UTF8;
+	int txt_enc = (!as_is) ? ID3V2_UTF8 : -1;
 
 	switch (id) {
 	case MMTAG_COMMENT:
-		if (!w->as_is) {
+	case MMTAG_LYRICS:
+		if (!as_is) {
 			ffmem_copy(buf, "eng\0", 4);
 			ffstr_set(&prefix, buf, 4);
 		}
 		break;
 
 	case MMTAG_PICTURE:
-		if (!w->as_is)
+		if (!as_is)
 			return 1; // not implemented
-		txt_enc = -1;
 		break;
 
 	case MMTAG_TRACKNO:
@@ -654,6 +681,24 @@ static inline int id3v2write_add(struct id3v2write *w, ffuint id, ffstr data)
 		break;
 	}
 
+	static const char id3v2_frame_str_v24[][4] = {
+		[MMTAG_ALBUM] =			"TALB",
+		[MMTAG_ALBUMARTIST] =	"TPE2",
+		[MMTAG_ARTIST] =		"TPE1",
+		[MMTAG_COMMENT] =		"COMM",
+		[MMTAG_COMPOSER] =		"TCOM",
+		[MMTAG_COPYRIGHT] =		"TCOP",
+		[MMTAG_DATE] =			"TYER",
+		[MMTAG_GENRE] =			"TCON",
+		[MMTAG_LYRICS] =		"USLT",
+		[MMTAG_PICTURE] =		"APIC",
+		[MMTAG_PUBLISHER] =		"TPUB",
+		[MMTAG_REPLAYGAIN_TRACK_GAIN] = "TXXX",
+		[MMTAG_TITLE] =			"TIT2",
+		[MMTAG_TRACKNO] =		"TRCK",
+		// MMTAG_DISCNUMBER,
+	};
+
 	if (id >= FF_COUNT(id3v2_frame_str_v24)
 		|| id3v2_frame_str_v24[id][0] == '\0')
 		return 1; // tag id not supported
@@ -666,6 +711,17 @@ static inline int id3v2write_add(struct id3v2write *w, ffuint id, ffstr data)
 		w->trackno[0] = w->tracktotal[0] = '\0';
 	}
 	return 0;
+}
+
+static inline int id3v2write_add_txxx(struct id3v2write *w, ffstr name, ffstr data)
+{
+	char buf[256];
+	if (name.len >= sizeof(buf))
+		return 1; // too large name
+	*(char*)ffmem_copy(buf, name.ptr, name.len) = '\0';
+	name.ptr = buf;
+	name.len++;
+	return _id3v2write_addframe(w, "TXXX", name, data, ID3V2_UTF8);
 }
 
 /** Finalize ID3v2 tag data */

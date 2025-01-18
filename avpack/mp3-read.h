@@ -112,7 +112,7 @@ static inline int mp3read_process(mp3read *m, ffstr *input, ffstr *output)
 			case ID3V2READ_NO:
 				break;
 			case ID3V2READ_DONE:
-				m->data_off = m->off;
+				m->data_off = id3v2read_size(&m->id3v2);
 				break;
 			case ID3V2READ_ERROR:
 				m->state = R_FTR_SEEK;
