@@ -135,6 +135,25 @@ static inline int apetagread_footer(struct apetagread *a, ffstr input, ffint64 *
 	return _APETAGREAD_ERR(a, "invalid parser state");
 }
 
+static int _apetagr_field_read(struct apetagread *a, ffstr *data, ffstr *name, ffstr *value)
+{
+	if (sizeof(struct apetagfld) > data->len)
+		return _APETAGREAD_ERR(a, "corrupt data");
+	const struct apetagfld *f = (struct apetagfld*)data->ptr;
+	ffstr_shift(data, sizeof(struct apetagfld));
+	unsigned val_len = ffint_le_cpu32_ptr(f->val_len);
+	int r = ffstr_findchar(data, '\0');
+	if (r < 0 || r+1 + val_len > data->len)
+		return _APETAGREAD_ERR(a, "corrupt data");
+
+	ffstr_set(name, data->ptr, r);
+	ffstr_set(value, data->ptr + r+1, val_len);
+	ffstr_shift(data, r+1 + val_len);
+
+	r = ffszarr_ifindsorted(_apetag_str, FF_COUNT(_apetag_str), name->ptr, name->len);
+	return (r >= 0) ? -(int)_apetag_int[r] : MMTAG_UNKNOWN;
+}
+
 /**
 Return >0: enum APETAGREAD_R
  <=0: enum MMTAG */
@@ -168,28 +187,10 @@ static inline int apetagread_process(struct apetagread *a, ffstr *input, ffstr *
 			ffstr_shift(&a->chunk, sizeof(struct apetaghdr));
 			a->state = R_FLD;
 			// fallthrough
-		case R_FLD: {
+		case R_FLD:
 			if (a->chunk.len == 0)
 				return APETAGREAD_DONE;
-			else if (sizeof(struct apetagfld) > a->chunk.len)
-				return _APETAGREAD_ERR(a, "not enough data");
-
-			const struct apetagfld *f = (struct apetagfld*)a->chunk.ptr;
-			ffstr_shift(&a->chunk, sizeof(struct apetagfld));
-			ffuint val_len = ffint_le_cpu32_ptr(f->val_len);
-			r = ffstr_findchar(&a->chunk, '\0');
-			if (r < 0 || r+1 + val_len > a->chunk.len)
-				return _APETAGREAD_ERR(a, "corrupted field data");
-
-			ffstr_set(name, a->chunk.ptr, r);
-			ffstr_set(value, &a->chunk.ptr[r+1], val_len);
-			ffstr_shift(&a->chunk, r+1 + val_len);
-
-			r = ffszarr_ifindsorted(_apetag_str, FF_COUNT(_apetag_str), name->ptr, name->len);
-			if (r < 0)
-				return MMTAG_UNKNOWN;
-			return -(int)_apetag_int[r];
-		}
+			return _apetagr_field_read(a, &a->chunk, name, value);
 		}
 	}
 

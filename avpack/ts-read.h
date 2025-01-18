@@ -19,7 +19,7 @@ PKT(PID:#DATA, DATA)...
 */
 
 #pragma once
-#include <avpack/shared.h>
+#include <ffbase/stream.h>
 #include <ffbase/map.h>
 
 struct ts_packet {
@@ -57,7 +57,7 @@ typedef struct tsread {
 	ffuint64 off;
 	ffmap pms; // pid => struct _tsr_pm*
 	struct _tsr_pm *cur;
-	struct avp_stream stream;
+	ffstream stream;
 	struct ts_packet pkt;
 	const char *error;
 
@@ -102,7 +102,7 @@ static struct _tsr_pm* _tsr_pm_add(tsread *t, ffuint pid)
 static inline void tsread_open(tsread *t, ffuint64 total_size)
 {
 	t->gather = 188;
-	_avp_stream_realloc(&t->stream, 188);
+	ffstream_realloc(&t->stream, 188);
 
 	ffmap_init(&t->pms, _tsr_pids_keyeq);
 	_tsr_pm_add_new(t, 0);
@@ -117,7 +117,7 @@ static inline void tsread_close(tsread *t)
 		ffmem_free(it->val);
 	}
 	ffmap_free(&t->pms);
-	_avp_stream_free(&t->stream);
+	ffstream_free(&t->stream);
 }
 
 enum TSREAD_R {
@@ -156,7 +156,7 @@ payload[]
 static int _tsr_pkt_read(tsread *t, ffstr data, struct ts_packet *p)
 {
 	ffmem_zero_obj(p);
-	p->off = t->off - _avp_stream_used(&t->stream);
+	p->off = t->off - ffstream_used(&t->stream);
 
 	ffuint n;
 	const ffbyte *d = (ffbyte*)data.ptr, *end = (ffbyte*)data.ptr + data.len;
@@ -326,7 +326,7 @@ static inline int tsread_process(tsread *t, ffstr *input, ffstr *output)
 	ffstr chunk;
 
 	for (;;) {
-		r = _avp_stream_gather(&t->stream, *input, t->gather, &chunk);
+		r = ffstream_gather(&t->stream, *input, t->gather, &chunk);
 		ffstr_shift(input, r);
 		t->off += r;
 		if (chunk.len < t->gather)
@@ -334,7 +334,7 @@ static inline int tsread_process(tsread *t, ffstr *input, ffstr *output)
 		chunk.len = t->gather;
 
 		r = _tsr_pkt_read(t, chunk, &t->pkt);
-		_avp_stream_consume(&t->stream, t->gather);
+		ffstream_consume(&t->stream, t->gather);
 		if (r)
 			return TSREAD_WARN;
 

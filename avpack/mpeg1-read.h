@@ -17,7 +17,7 @@ mpeg1read_cursample
 
 #include <avpack/mpeg1-fmt.h>
 #include <ffbase/string.h>
-#include <avpack/shared.h>
+#include <ffbase/stream.h>
 
 struct mpeg1read_info {
 	ffuint layer; // 1..3
@@ -33,7 +33,7 @@ typedef struct mpeg1read {
 	ffuint state, nextstate;
 	const char *error;
 	ffuint gather_size;
-	struct avp_stream stream;
+	ffstream stream;
 	ffstr chunk;
 	ffuint64 off, frame1_off, frame_off;
 	ffuint64 cur_sample, seek_sample;
@@ -50,12 +50,12 @@ static inline void mpeg1read_open(mpeg1read *m, ffuint64 total_size)
 {
 	m->seek_sample = (ffuint64)-1;
 	m->total_size = total_size;
-	_avp_stream_realloc(&m->stream, 4096);
+	ffstream_realloc(&m->stream, 4096);
 }
 
 static inline void mpeg1read_close(mpeg1read *m)
 {
-	_avp_stream_free(&m->stream);
+	ffstream_free(&m->stream);
 }
 
 enum MPEG1READ_R {
@@ -76,7 +76,7 @@ static int _mpeg1read_hdr_find(mpeg1read *m, ffstr *input, ffstr *output)
 	ffstr chunk = {};
 
 	for (;;) {
-		r = _avp_stream_gather(&m->stream, *input, 4, &chunk);
+		r = ffstream_gather(&m->stream, *input, 4, &chunk);
 		ffstr_shift(input, r);
 		m->off += r;
 		if (chunk.len < 4)
@@ -87,10 +87,10 @@ static int _mpeg1read_hdr_find(mpeg1read *m, ffstr *input, ffstr *output)
 			m->unrecognized_data = 1;
 		if (pos >= 0)
 			break;
-		_avp_stream_consume(&m->stream, chunk.len - (4-1));
+		ffstream_consume(&m->stream, chunk.len - (4-1));
 	}
 
-	_avp_stream_consume(&m->stream, pos);
+	ffstream_consume(&m->stream, pos);
 	ffstr_shift(&chunk, pos);
 	*output = chunk;
 	return 0;
@@ -199,7 +199,7 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 		switch (m->state) {
 
 		case R_GATHER:
-			r = _avp_stream_gather(&m->stream, *input, m->gather_size, &m->chunk);
+			r = ffstream_gather(&m->stream, *input, m->gather_size, &m->chunk);
 			ffstr_shift(input, r);
 			m->off += r;
 			if (m->chunk.len < m->gather_size)
@@ -225,7 +225,7 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 			const void *h2 = &m->chunk.ptr[r];
 			if (!(mpeg1_valid(h2)
 				&& mpeg1_match(m->chunk.ptr, h2))) {
-				_avp_stream_consume(&m->stream, 1);
+				ffstream_consume(&m->stream, 1);
 				m->state = R_HDR_FIND;
 				continue;
 			}
@@ -236,12 +236,12 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 				r = _mpeg1read_info(m, m->chunk, r);
 				m->frame1_off = m->off - m->chunk.len + r;
 				ffmem_copy(m->prev_hdr, m->chunk.ptr, 4);
-				m->frame_off = m->off - _avp_stream_used(&m->stream);
+				m->frame_off = m->off - ffstream_used(&m->stream);
 				if (r != 0) {
 					// skip and return Xing tag
 					ffstr_set(output, m->chunk.ptr, r);
 					ffstr_shift(&m->chunk, r);
-					_avp_stream_consume(&m->stream, r);
+					ffstream_consume(&m->stream, r);
 				}
 				return MPEG1READ_HEADER;
 			}
@@ -258,7 +258,7 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 				m->off = off;
 				m->cur_sample = m->seek_sample;
 				m->seek_sample = (ffuint64)-1;
-				_avp_stream_reset(&m->stream);
+				ffstream_reset(&m->stream);
 				m->state = R_HDR_FIND;
 				return MPEG1READ_SEEK;
 			}
@@ -266,7 +266,7 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 			if (m->state == R_HDR) {
 				h = m->chunk.ptr;
 				if (!mpeg1_match(h, m->prev_hdr)) {
-					_avp_stream_consume(&m->stream, 1);
+					ffstream_consume(&m->stream, 1);
 					m->state = R_HDR_FIND;
 					continue;
 				}
@@ -278,12 +278,12 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 
 		// case R_FRAME:
 			ffstr_set(output, m->chunk.ptr, m->gather_size);
-			m->frame_off = m->off - _avp_stream_used(&m->stream);
+			m->frame_off = m->off - ffstream_used(&m->stream);
 			m->state = R_FRAME_NEXT;
 			return MPEG1READ_DATA;
 
 		case R_FRAME_NEXT:
-			_avp_stream_consume(&m->stream, m->gather_size);
+			ffstream_consume(&m->stream, m->gather_size);
 			m->cur_sample += mpeg1_samples(m->prev_hdr);
 			m->state = R_GATHER,  m->nextstate = R_HDR,  m->gather_size = 4;
 			continue;

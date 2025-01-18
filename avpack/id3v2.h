@@ -22,7 +22,7 @@ PADDING
 
 #include <avpack/id3v1.h>
 #include <avpack/mmtag.h>
-#include <avpack/shared.h>
+#include <ffbase/stream.h>
 #include <ffbase/vector.h>
 #include <ffbase/unicode.h>
 
@@ -86,7 +86,7 @@ static inline unsigned _id3v2_int7_read(unsigned i)
 struct id3v2read {
 	ffuint state, nextstate;
 	ffsize gather_size;
-	struct avp_stream stm;
+	ffstream stm;
 	ffvec unsync_buf, text_buf;
 	ffstr chunk;
 	ffuint offset;
@@ -114,7 +114,7 @@ static inline void id3v2read_open(struct id3v2read *d)
 
 static inline void id3v2read_close(struct id3v2read *d)
 {
-	_avp_stream_free(&d->stm);
+	ffstream_free(&d->stm);
 	ffvec_free(&d->unsync_buf);
 	ffvec_free(&d->text_buf);
 }
@@ -400,7 +400,7 @@ end:
 }
 
 /** Read next ID3v2 tag field.
-IMPORTANT: some input data may be kept in cache (read with _avp_stream_view(&d->stm)).
+IMPORTANT: some input data may be kept in cache (read with ffstream_view(&d->stm)).
 Return >0: enum ID3V2READ_R
 	<=0: enum MMTAG */
 static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *name, ffstr *value)
@@ -423,9 +423,9 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 		case R_GATHER:
 			if (d->total_size && d->offset + d->gather_size > d->total_size)
 				return _ID3V2READ_ERR(d, "corrupt data");
-			if (_avp_stream_realloc(&d->stm, d->gather_size))
+			if (ffstream_realloc(&d->stm, d->gather_size))
 				return _ID3V2READ_ERR(d, "not enough memory");
-			r = _avp_stream_gather(&d->stm, *input, d->gather_size, &d->chunk);
+			r = ffstream_gather(&d->stm, *input, d->gather_size, &d->chunk);
 			ffstr_shift(input, r);
 			if (d->chunk.len < d->gather_size)
 				return ID3V2READ_MORE;
@@ -443,14 +443,14 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 			}
 
 			ffstr_shift(&d->chunk, sizeof(struct id3v2_hdr));
-			_avp_stream_consume(&d->stm, sizeof(struct id3v2_hdr));
+			ffstream_consume(&d->stm, sizeof(struct id3v2_hdr));
 			d->offset += sizeof(struct id3v2_hdr);
 			d->state = R_FR;
 			continue;
 
 		case R_HDR_EXT:
 			ffstr_shift(&d->chunk, d->gather_size);
-			_avp_stream_consume(&d->stm, d->gather_size);
+			ffstream_consume(&d->stm, d->gather_size);
 			d->offset += d->gather_size;
 			d->state = R_FR;
 			continue;
@@ -465,8 +465,8 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 
 		case R_FR_HDR:
 			if (d->chunk.ptr[0] == '\0') {
-				n = ffmin(_avp_stream_used(&d->stm), d->total_size - d->offset);
-				_avp_stream_consume(&d->stm, n);
+				n = ffmin(ffstream_used(&d->stm), d->total_size - d->offset);
+				ffstream_consume(&d->stm, n);
 				d->offset += n;
 				d->state = R_PADDING;
 				continue;
@@ -497,7 +497,7 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 			// fallthrough
 
 		case R_DATA:
-			_avp_stream_consume(&d->stm, d->gather_size);
+			ffstream_consume(&d->stm, d->gather_size);
 			d->offset += d->gather_size;
 			ffstr_setz(name, d->frame_id);
 			d->state = R_FR;

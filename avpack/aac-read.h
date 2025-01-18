@@ -19,7 +19,7 @@ aacadts_find
 */
 
 #pragma once
-#include <avpack/shared.h>
+#include <ffbase/stream.h>
 
 
 enum AACREAD_R {
@@ -47,7 +47,7 @@ typedef struct aacread {
 	const char *error;
 	ffuint64 off;
 	ffuint frlen;
-	struct avp_stream stream;
+	ffstream stream;
 	ffstr chunk;
 	char asc[2];
 	ffbyte first_hdr[7];
@@ -63,12 +63,12 @@ static inline const char* aacread_error(aacread *a)
 
 static inline void aacread_open(aacread *a)
 {
-	_avp_stream_realloc(&a->stream, 4096);
+	ffstream_realloc(&a->stream, 4096);
 }
 
 static inline void aacread_close(aacread *a)
 {
-	_avp_stream_free(&a->stream);
+	ffstream_free(&a->stream);
 }
 
 static ffuint64 _aacadts_bit_read64(ffuint64 val, ffuint *off, ffuint n)
@@ -210,7 +210,7 @@ static int _aacread_hdr_find(aacread *a, ffstr *input, ffstr *out)
 
 	for (;;) {
 
-		r = _avp_stream_gather(&a->stream, *input, 7, &chunk);
+		r = ffstream_gather(&a->stream, *input, 7, &chunk);
 		ffstr_shift(input, r);
 		a->off += r;
 		if (chunk.len < 7)
@@ -220,10 +220,10 @@ static int _aacread_hdr_find(aacread *a, ffstr *input, ffstr *out)
 		if (pos >= 0)
 			break;
 
-		_avp_stream_consume(&a->stream, chunk.len - (7-1));
+		ffstream_consume(&a->stream, chunk.len - (7-1));
 	}
 
-	_avp_stream_consume(&a->stream, pos);
+	ffstream_consume(&a->stream, pos);
 	ffstr_shift(&chunk, pos);
 	*out = chunk;
 	a->frlen = h.framelen;
@@ -243,7 +243,7 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 	for (;;) {
 		switch (a->state) {
 		case R_GATHER:
-			r = _avp_stream_gather(&a->stream, *input, a->gather_size, &a->chunk);
+			r = ffstream_gather(&a->stream, *input, a->gather_size, &a->chunk);
 			ffstr_shift(input, r);
 			a->off += r;
 			if (a->chunk.len < a->gather_size)
@@ -264,7 +264,7 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 			const void *h2 = &a->chunk.ptr[a->frlen];
 			if (!(0 == aacadts_parse(&h, h2)
 				&& aacadts_match(a->chunk.ptr, h2))) {
-				_avp_stream_consume(&a->stream, 1);
+				ffstream_consume(&a->stream, 1);
 				a->state = R_HDR_FIND;
 				continue;
 			}
@@ -313,7 +313,7 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 			// fallthrough
 		case R_FR: {
 			*output = a->chunk;
-			_avp_stream_consume(&a->stream, a->gather_size);
+			ffstream_consume(&a->stream, a->gather_size);
 			ffuint st = a->state;
 			a->state = R_GATHER,  a->nextstate = R_HDR,  a->gather_size = 7;
 			if (st == R_FR)

@@ -18,7 +18,7 @@ mkvread_block_trackid
 #pragma once
 
 #include <avpack/mkv-fmt.h>
-#include <avpack/shared.h>
+#include <ffbase/stream.h>
 
 struct mkv_el {
 	int id; // enum MKV_ELID
@@ -76,7 +76,7 @@ typedef struct mkvread {
 	ffuint gstate;
 	ffuint gsize;
 	ffstr gbuf;
-	struct avp_stream stream;
+	ffstream stream;
 
 	struct mkv_el els[6];
 	ffuint ictx;
@@ -187,7 +187,7 @@ static inline int mkvread_open(mkvread *m, ffuint64 total_size)
 	m->els[m->ictx].size = (ffuint64)-1;
 	m->els[m->ictx].endoff = (ffuint64)-1;
 	m->els[m->ictx].ctx = mkv_ctx_global;
-	_avp_stream_realloc(&m->stream, 4096);
+	ffstream_realloc(&m->stream, 4096);
 	return 0;
 }
 
@@ -201,7 +201,7 @@ static inline void mkvread_close(mkvread *m)
 			ffstr_free(&t->video.codec_conf);
 	}
 	ffvec_free(&m->tracks);
-	_avp_stream_free(&m->stream);
+	ffstream_free(&m->stream);
 	ffstr_free(&m->codec_data);
 	ffvec_free(&m->lacing);
 	ffvec_free(&m->tagname);
@@ -268,7 +268,7 @@ static int _mkvread_el_hdr(mkvread *m)
 	m->ictx++;
 	struct mkv_el *el = &m->els[m->ictx];
 	el->size = size;
-	m->el_off = m->off - _avp_stream_used(&m->stream);
+	m->el_off = m->off - ffstream_used(&m->stream);
 	el->endoff = m->el_off + n + el->size;
 
 	el->id = MKV_T_UKN;
@@ -286,7 +286,7 @@ static int _mkvread_el_hdr(mkvread *m)
 	if (el->endoff > parent->endoff)
 		return _MKVR_ERRSTR(m, "too large element");
 
-	_avp_stream_consume(&m->stream, n); // skip header
+	ffstream_consume(&m->stream, n); // skip header
 	ffstr_shift(&m->gbuf, n);
 
 	if (el->id == MKV_T_UKN) {
@@ -542,7 +542,7 @@ static int _mkvr_seek_sync(mkvread *m, ffstr *input, ffstr *output)
 	int r, pos;
 	ffstr chunk = {};
 	for (;;) {
-		r = _avp_stream_gather(&m->stream, *input, 4, &chunk);
+		r = ffstream_gather(&m->stream, *input, 4, &chunk);
 		ffstr_shift(input, r);
 		m->off += r;
 		if (chunk.len < 4)
@@ -551,10 +551,10 @@ static int _mkvr_seek_sync(mkvread *m, ffstr *input, ffstr *output)
 		if (0 <= (pos = ffstr_find(&chunk, "\x1f\x43\xb6\x75", 4)))
 			break;
 
-		_avp_stream_consume(&m->stream, chunk.len - (4-1));
+		ffstream_consume(&m->stream, chunk.len - (4-1));
 	}
 
-	_avp_stream_consume(&m->stream, pos);
+	ffstream_consume(&m->stream, pos);
 	ffstr_shift(&chunk, pos);
 	m->clust_off = m->off - chunk.len;
 	*output = chunk;
@@ -626,9 +626,9 @@ static inline int mkvread_process(mkvread *m, ffstr *input, ffstr *output)
 	for (;;) {
 		switch (m->state) {
 		case R_GATHER:
-			if (0 != _avp_stream_realloc(&m->stream, m->gsize))
+			if (0 != ffstream_realloc(&m->stream, m->gsize))
 				return _MKVR_ERRSTR(m, "not enough memory");
-			r = _avp_stream_gather(&m->stream, *input, m->gsize, &m->gbuf);
+			r = ffstream_gather(&m->stream, *input, m->gsize, &m->gbuf);
 			ffstr_shift(input, r);
 			m->off += r;
 			if (m->gbuf.len < m->gsize)
@@ -640,7 +640,7 @@ static inline int mkvread_process(mkvread *m, ffstr *input, ffstr *output)
 			struct mkv_el *el = &m->els[m->ictx];
 			m->state = R_NEXTCHUNK;
 			if (el->endoff > m->off + input->len) {
-				_avp_stream_reset(&m->stream);
+				ffstream_reset(&m->stream);
 				m->gbuf.len = 0;
 				m->off = el->endoff;
 				return MKVREAD_SEEK;
@@ -648,7 +648,7 @@ static inline int mkvread_process(mkvread *m, ffstr *input, ffstr *output)
 
 			// skip existing bufferred data for this element
 			ffuint n = ffmin(el->size, m->gbuf.len);
-			_avp_stream_consume(&m->stream, n);
+			ffstream_consume(&m->stream, n);
 			ffstr_shift(&m->gbuf, n);
 
 			// skip existing input data for this element
@@ -660,7 +660,7 @@ static inline int mkvread_process(mkvread *m, ffstr *input, ffstr *output)
 
 		case R_NEXTCHUNK: {
 			struct mkv_el *el = &m->els[m->ictx];
-			if (m->off - _avp_stream_used(&m->stream) == el->endoff) {
+			if (m->off - ffstream_used(&m->stream) == el->endoff) {
 				if (-1 != (r = _mkvread_el_close(m)))
 					return r;
 				continue;
@@ -750,7 +750,7 @@ static inline int mkvread_process(mkvread *m, ffstr *input, ffstr *output)
 				continue;
 			}
 			m->last_seek_off = m->off;
-			_avp_stream_reset(&m->stream);
+			ffstream_reset(&m->stream);
 			m->state = R_SEEK_SYNC;
 			return MKVREAD_SEEK;
 
@@ -764,7 +764,7 @@ static inline int mkvread_process(mkvread *m, ffstr *input, ffstr *output)
 					m->state = R_SEEK_DONE;
 					continue;
 				} else if (r2 == MKVREAD_SEEK) {
-					_avp_stream_reset(&m->stream);
+					ffstream_reset(&m->stream);
 					return MKVREAD_SEEK;
 				}
 			}
@@ -777,7 +777,7 @@ static inline int mkvread_process(mkvread *m, ffstr *input, ffstr *output)
 			continue;
 
 		case R_SEEK_NEXT:
-			_avp_stream_reset(&m->stream);
+			ffstream_reset(&m->stream);
 			m->state = R_SEEK_SYNC;
 			m->off = m->clust_off + 1;
 			return MKVREAD_SEEK;
@@ -793,7 +793,7 @@ static inline int mkvread_process(mkvread *m, ffstr *input, ffstr *output)
 			_mkvr_cluster_exit(m);
 			m->seek_cluster = 0;
 			m->seek_block = 1;
-			_avp_stream_reset(&m->stream);
+			ffstream_reset(&m->stream);
 			m->gbuf.len = 0;
 			m->last_seek_off = 0;
 			m->off = m->seekpt[0].off;

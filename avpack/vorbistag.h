@@ -68,6 +68,27 @@ static const char *const _vorbistag_str[] = {
 	"TRACKTOTAL",
 };
 
+static int _vorbistagr_field_read(vorbistagread *v, ffstr *in, ffstr *name, ffstr *val)
+{
+	if (4 > in->len)
+		return VORBISTAGREAD_ERROR;
+	unsigned n = ffint_le_cpu32_ptr(in->ptr);
+	ffstr_shift(in, 4);
+
+	if (n > in->len)
+		return VORBISTAGREAD_ERROR;
+	int r = ffs_findchar(in->ptr, n, '=');
+	if (r < 0)
+		return VORBISTAGREAD_ERROR;
+	ffstr_set(name, in->ptr, r);
+	ffstr_set(val, in->ptr + r+1, n - (r+1));
+	ffstr_shift(in, n);
+	v->cnt--;
+
+	r = ffszarr_ifindsorted(_vorbistag_str, FF_COUNT(_vorbistag_str), name->ptr, name->len);
+	return (r >= 0) ? _vorbistag_mmtag[r] : (int)MMTAG_UNKNOWN;
+}
+
 /** Get the next tag.
 Note: partial input is not supported.
 Return >0: enum MMTAG
@@ -101,26 +122,11 @@ static inline int vorbistagread_process(vorbistagread *v, ffstr *in, ffstr *name
 		v->state = I_CMT;
 		// fallthrough
 
-	case I_CMT: {
+	case I_CMT:
 		if (v->cnt == 0)
 			return VORBISTAGREAD_DONE;
 
-		if (4 > in->len)
-			return VORBISTAGREAD_ERROR;
-		n = ffint_le_cpu32_ptr(in->ptr);
-		ffstr_shift(in, 4);
-
-		if (n > in->len)
-			return VORBISTAGREAD_ERROR;
-		ffssize pos = ffs_findchar(in->ptr, n, '=');
-		ffs_split(in->ptr, n, pos, name, val);
-		ffstr_shift(in, n);
-		v->cnt--;
-
-		int tag = ffszarr_ifindsorted(_vorbistag_str, FF_COUNT(_vorbistag_str), name->ptr, name->len);
-		tag = (tag != -1) ? _vorbistag_mmtag[tag] : 0;
-		return tag;
-	}
+		return _vorbistagr_field_read(v, in, name, val);
 	}
 
 	return VORBISTAGREAD_ERROR;
@@ -161,7 +167,7 @@ static inline int vorbistagwrite_add_name(vorbistagwrite *v, ffstr name, ffstr v
 		// vendor
 		*(ffuint*)d = ffint_le_cpu32(val.len);
 		d += 4;
-		d = ffmem_copy(d, val.ptr, val.len);
+		d = (char*)ffmem_copy(d, val.ptr, val.len);
 		d += 4;
 
 	} else {
@@ -169,7 +175,7 @@ static inline int vorbistagwrite_add_name(vorbistagwrite *v, ffstr name, ffstr v
 		d += 4;
 		d += ffs_upper(d, -1, name.ptr, name.len);
 		*d++ = '=';
-		d = ffmem_copy(d, val.ptr, val.len);
+		d = (char*)ffmem_copy(d, val.ptr, val.len);
 	}
 
 	v->out.len = d - (char*)v->out.ptr;

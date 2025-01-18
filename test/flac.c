@@ -178,23 +178,6 @@ void test_flac_read(ffstr data, int partial, int seek)
 		// xlog("flacread_process: %d", r);
 		switch (r) {
 
-		case FLACREAD_TAG: {
-			ffstr name, val;
-			ffuint t = flacread_tag(&f, &name, &val);
-			// int k = 0;
-			const struct tag *tag;
-			FF_FOREACH(tags, tag) {
-				if (tag->name == t) {
-					// xseq(&val, tag->val);
-					// k = 1;
-					break;
-				}
-			}
-			xlog("flacread_tag: (%u) %S = %S", (int)t, &name , &val);
-			// x(k == 1);
-			break;
-		}
-
 		case FLACREAD_HEADER: {
 			const struct flac_info *info = flacread_info(&f);
 			xieq(16, info->bits);
@@ -207,6 +190,9 @@ void test_flac_read(ffstr data, int partial, int seek)
 				flacread_seek(&f, seek);
 			break;
 		}
+
+		case FLACREAD_META_BLOCK:
+			break;
 
 		case FLACREAD_DATA:
 			frno++;
@@ -267,7 +253,7 @@ void test_flac_seek(ffstr data, ffuint delta_msec, int partial)
 		case FLACREAD_HEADER:
 			info = flacread_info(&f);
 			break;
-		case FLACREAD_TAG:
+		case FLACREAD_META_BLOCK:
 			break;
 		case FLACREAD_HEADER_FIN:
 			break;

@@ -22,7 +22,7 @@ fLaC (HDR STREAMINFO) [HDR BLOCK]... (FRAME_HDR SUBFRAME... FRAME_FOOTER)...
 #pragma once
 
 #include <avpack/flac-fmt.h>
-#include <avpack/shared.h>
+#include <ffbase/stream.h>
 #include <ffbase/vector.h>
 
 typedef void (*flac_log_t)(void *udata, const char *fmt, va_list va);
@@ -30,7 +30,7 @@ typedef void (*flac_log_t)(void *udata, const char *fmt, va_list va);
 typedef struct flacread {
 	ffuint state, nextstate;
 	const char *error;
-	struct avp_stream stream;
+	ffstream stream;
 	ffstr chunk;
 	ffsize gather;
 	ffuint64 off;
@@ -79,12 +79,12 @@ static inline void flacread_open(flacread *f, ffuint64 total_size)
 {
 	f->total_size = total_size;
 	f->seek_sample = (ffuint64)-1;
-	_avp_stream_realloc(&f->stream, 64*1024);
+	ffstream_realloc(&f->stream, 64*1024);
 }
 
 static inline void flacread_close(flacread *f)
 {
-	_avp_stream_free(&f->stream);
+	ffstream_free(&f->stream);
 	ffmem_free(f->sktab.ptr);
 }
 
@@ -106,7 +106,7 @@ static int _flacr_hdr_find(flacread *f, ffstr *input, ffuint *islastblock)
 	ffstr chunk = {};
 
 	for (;;) {
-		int r = _avp_stream_gather(&f->stream, *input, FLAC_HDR_MINSIZE, &chunk);
+		int r = ffstream_gather(&f->stream, *input, FLAC_HDR_MINSIZE, &chunk);
 		ffstr_shift(input, r);
 		f->off += r;
 		if (chunk.len < FLAC_HDR_MINSIZE) {
@@ -126,7 +126,7 @@ static int _flacr_hdr_find(flacread *f, ffstr *input, ffuint *islastblock)
 			break;
 		}
 
-		_avp_stream_consume(&f->stream, chunk.len - (FLAC_HDR_MINSIZE-1));
+		ffstream_consume(&f->stream, chunk.len - (FLAC_HDR_MINSIZE-1));
 	}
 
 	if (f->total_size != 0 && f->info.total_samples != 0)
@@ -294,21 +294,21 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 				return FLACREAD_MORE;
 			}
 
-			_avp_stream_consume(&f->stream, r);
+			ffstream_consume(&f->stream, r);
 			f->state = I_META_NEXT;
 			return FLACREAD_HEADER;
 
 		case I_GATHER:
 		case I_GATHER_SOME:
-			if (0 != _avp_stream_realloc(&f->stream, f->gather))
+			if (0 != ffstream_realloc(&f->stream, f->gather))
 				return _FLACR_ERR(f, "not enough memory");
-			r = _avp_stream_gather(&f->stream, *input, f->gather, &f->chunk);
+			r = ffstream_gather(&f->stream, *input, f->gather, &f->chunk);
 			ffstr_shift(input, r);
 			f->off += r;
 			if (f->chunk.len < f->gather && f->state == I_GATHER)
 				return FLACREAD_MORE;
 			if (f->state == I_GATHER)
-				_avp_stream_consume(&f->stream, f->gather);
+				ffstream_consume(&f->stream, f->gather);
 			f->state = f->nextstate;
 			continue;
 
@@ -316,7 +316,7 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 			if (f->last_hdr_block) {
 				f->gather = 16*1024;
 				f->state = I_FRAME;
-				f->frame1_off = (ffuint)f->off - _avp_stream_used(&f->stream);
+				f->frame1_off = (ffuint)f->off - ffstream_used(&f->stream);
 				return FLACREAD_HEADER_FIN;
 			}
 			f->state = I_GATHER,  f->nextstate = I_META,  f->gather = sizeof(struct flac_hdr);
@@ -389,7 +389,7 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 				*output = f->chunk; // use all we have
 				f->state = I_DONE;
 			} else {
-				_avp_stream_consume(&f->stream, r);
+				ffstream_consume(&f->stream, r);
 			}
 
 			if (f->seek_sample != (ffuint64)-1)
@@ -407,7 +407,7 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 		case I_SEEK_OFF:
 			f->off = _flacr_seek_offset(f->seekpt, f->seek_sample, f->last_seek_off);
 			f->last_seek_off = f->off;
-			_avp_stream_reset(&f->stream);
+			ffstream_reset(&f->stream);
 			f->state = I_GATHER_SOME,  f->nextstate = I_SEEK_FRAME;
 			return FLACREAD_SEEK;
 
@@ -443,7 +443,7 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 					f->off = o;
 					f->last_seek_off = f->off;
 					f->chunk.len = 0;
-					_avp_stream_reset(&f->stream);
+					ffstream_reset(&f->stream);
 					return FLACREAD_SEEK;
 				}
 
@@ -456,7 +456,7 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 
 			f->off = f->seekpt[0].off;
 			f->seek_sample = (ffuint64)-1;
-			_avp_stream_reset(&f->stream);
+			ffstream_reset(&f->stream);
 			f->state = I_FRAME;
 			return FLACREAD_SEEK;
 		}
@@ -480,7 +480,7 @@ static inline const struct flac_info* flacread_info(flacread *f)
 #define flacread_meta_type(f)  ((f)->meta_type)
 
 /** File offset at meta block header */
-#define flacread_meta_offset(f)  ((f)->off - _avp_stream_used(&(f)->stream) - sizeof(struct flac_hdr) - (f)->chunk.len)
+#define flacread_meta_offset(f)  ((f)->off - ffstream_used(&(f)->stream) - sizeof(struct flac_hdr) - (f)->chunk.len)
 
 /** Get an absolute sample number */
 #define flacread_cursample(f)  ((f)->frame.pos)

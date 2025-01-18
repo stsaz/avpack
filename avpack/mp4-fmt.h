@@ -48,6 +48,7 @@ mdat(CHUNK(SAMPLE(DATA)...)...)
 #pragma once
 
 #include <avpack/mmtag.h>
+#include <avpack/id3v1.h>
 #include <ffbase/string.h>
 
 struct mp4box {
@@ -903,26 +904,8 @@ static inline int mp4_ilst_data_read(const char *data, ffuint len, ffuint parent
 		if (sizeof(short) > len || !(d->type == MP4_ILST_IMPLICIT || d->type == MP4_ILST_INT))
 			return 0;
 
-		static const char id3_genres[][18] = {
-			"Blues", "Classic Rock", "Country", "Dance", "Disco",
-			"Funk", "Grunge", "Hip-Hop", "Jazz", "Metal",
-			"New Age", "Oldies", "Other", "Pop", "R&B",
-			"Rap", "Reggae", "Rock", "Techno", "Industrial",
-			"Alternative", "Ska", "Death Metal", "Pranks", "Soundtrack",
-			"Euro-Techno", "Ambient", "Trip-Hop", "Vocal", "Jazz+Funk",
-			"Fusion", "Trance", "Classical", "Instrumental", "Acid",
-			"House", "Game", "Sound Clip", "Gospel", "Noise",
-			"AlternRock", "Bass", "Soul", "Punk", "Space",
-			"Meditative", "Instrumental Pop", "Instrumental Rock", "Ethnic", "Gothic",
-			"Darkwave", "Techno-Industrial", "Electronic", "Pop-Folk", "Eurodance",
-			"Dream", "Southern Rock", "Comedy", "Cult", "Gangsta",
-			"Top 40", "Christian Rap", "Pop/Funk", "Jungle", "Native American",
-			"Cabaret", "New Wave", "Psychadelic", "Rave", "Showtunes",
-			"Trailer", "Lo-Fi", "Tribal", "Acid Punk", "Acid Jazz",
-			"Polka", "Retro", "Musical", "Rock & Roll", "Hard Rock", //75-79
-		};
 		ffuint n = ffint_be_cpu16_ptr(data);
-		const char *g = (n < FF_COUNT(id3_genres)) ? id3_genres[n] : "";
+		const char *g = (n < FF_COUNT(id3v1_genres)) ? id3v1_genres[n] : "";
 		ffstr_setz(tagval, g);
 		return MMTAG_GENRE;
 	}
@@ -1067,23 +1050,22 @@ moov
 mdat
 */
 
-static const struct mp4_bbox mp4_ctx_moov[];
-
-static const struct mp4_bbox mp4_ctx_trak[];
-static const struct mp4_bbox mp4_ctx_mdia[];
-static const struct mp4_bbox mp4_ctx_minf[];
-static const struct mp4_bbox mp4_ctx_dinf[];
-static const struct mp4_bbox mp4_ctx_dref[];
-static const struct mp4_bbox mp4_ctx_stbl[];
-static const struct mp4_bbox mp4_ctx_stsd[];
-static const struct mp4_bbox mp4_ctx_alac[];
-static const struct mp4_bbox mp4_ctx_mp4a[];
-static const struct mp4_bbox mp4_ctx_mp4a_wave[];
-
-static const struct mp4_bbox mp4_ctx_udta[];
-static const struct mp4_bbox mp4_ctx_meta[];
-static const struct mp4_bbox mp4_ctx_data[];
-static const struct mp4_bbox mp4_ctx_itunes[];
+static const struct mp4_bbox
+	mp4_ctx_moov[],
+	mp4_ctx_trak[],
+	mp4_ctx_mdia[],
+	mp4_ctx_minf[],
+	mp4_ctx_dinf[],
+	mp4_ctx_dref[],
+	mp4_ctx_stbl[],
+	mp4_ctx_stsd[],
+	mp4_ctx_alac[],
+	mp4_ctx_mp4a[],
+	mp4_ctx_mp4a_wave[],
+	mp4_ctx_udta[],
+	mp4_ctx_meta[],
+	mp4_ctx_data[],
+	mp4_ctx_itunes[];
 
 const struct mp4_bbox mp4_ctx_global[] = {
 	{"ftyp", BOX_FTYP | MP4_PRIO(1) | MP4_MINSIZE(sizeof(struct mp4_ftyp)), NULL},
