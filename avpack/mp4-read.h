@@ -20,6 +20,7 @@ mp4read_offset
 #pragma once
 
 #include <avpack/mp4-fmt.h>
+#include <ffbase/stream.h>
 #include <ffbase/vector.h>
 
 
@@ -72,6 +73,8 @@ struct mp4read_track {
 typedef struct mp4read {
 	ffuint state, nextstate;
 	ffuint gather_size;
+	ffstream stream;
+	ffstr chunk;
 
 	int err; // enum MP4READ_E
 	char errmsg[64];
@@ -81,8 +84,6 @@ typedef struct mp4read {
 
 	ffuint64 off;
 	ffuint64 total_size;
-	ffvec buf;
-	ffstr chunk;
 	ffuint frsize;
 	ffstr stts;
 	ffstr stsc;
@@ -93,7 +94,7 @@ typedef struct mp4read {
 	ffvec tracks; // struct mp4read_track[]
 
 	ffuint tag; // enum MMTAG
-	ffstr tagval;
+	ffstr tagval, tag_trktotal;
 	char tagbuf[32];
 
 	mp4_log_t log;
@@ -173,8 +174,7 @@ enum MP4READ_E {
 	MP4READ_EOK,
 	MP4READ_EMEM,
 	MP4READ_EDATA,
-	MP4READ_ELARGE,
-	MP4READ_ESMALL,
+	MP4READ_ESIZE,
 	MP4READ_EORDER,
 	MP4READ_EDUPBOX,
 	MP4READ_ENOREQ,
@@ -188,8 +188,7 @@ static inline const char* mp4read_error(mp4read *m)
 		"", // MP4READ_EOK
 		"not enough memory", // MP4READ_EMEM
 		"invalid data", // MP4READ_EDATA
-		"box is larger than its parent", // MP4READ_ELARGE
-		"too small box", // MP4READ_ESMALL
+		"invalid box size", // MP4READ_ESIZE
 		"unsupported order of boxes", // MP4READ_EORDER
 		"duplicate box", // MP4READ_EDUPBOX
 		"mandatory box not found", // MP4READ_ENOREQ
@@ -241,7 +240,7 @@ static inline void mp4read_close(mp4read *m)
 	ffvec_free(&m->tracks);
 	ffstr_free(&m->stts);
 	ffstr_free(&m->stsc);
-	ffvec_free(&m->buf);
+	ffstream_free(&m->stream);
 }
 
 /**
@@ -251,15 +250,15 @@ Return 0 on success
 static inline int _mp4_box_parse(mp4read *m, struct mp4_box *parent, struct mp4_box *box, ffstr *data)
 {
 	const struct mp4box *b = (struct mp4box*)data->ptr;
+	if (sizeof(*b) > data->len)
+		return -1;
 
 	ffuint sz = ffint_be_cpu32_ptr(b->size);
-	ffuint box_szof;
-	if (sz != 1) {
-		box_szof = sizeof(struct mp4box);
-	} else if (data->len < sizeof(struct mp4box64)) {
-		return -1;
-	} else {
+	ffuint box_szof = sizeof(struct mp4box);
+	if (sz == 1) {
 		const struct mp4box64 *b64 = (struct mp4box64*)data->ptr;
+		if (sizeof(*b64) > data->len)
+			return -1;
 		sz = ffint_be_cpu64_ptr(b64->largesize);
 		box_szof = sizeof(struct mp4box64);
 	}
@@ -273,21 +272,17 @@ static inline int _mp4_box_parse(mp4read *m, struct mp4_box *parent, struct mp4_
 		box->ctx = b->ctx;
 	}
 
-	ffuint64 box_off = m->off - data->len;
-	_mp4read_log(m, "%*c%4s  size:%U  offset:%xU"
+	ffuint64 box_off = m->off - ffstream_used(&m->stream);
+	_mp4read_log(m, "%*c%4s  %U  @%xU"
 		, (ffsize)m->ictx, ' '
 		, b->type, box->osize, box_off);
 
-	if (box->osize < box_szof)
-		return MP4READ_ESMALL;
-	if (box->osize > parent->size)
-		return MP4READ_ELARGE;
+	if (box->osize < box_szof || box->osize > parent->size)
+		return MP4READ_ESIZE;
 
 	if (idx != -1 && ffbit_set32(&parent->usedboxes, idx) && !(box->type & MP4_F_MULTI))
 		return MP4READ_EDUPBOX;
 
-	// skip box header
-	ffstr_shift(data, box_szof);
 	box->size = sz - box_szof;
 	return 0;
 }
@@ -349,15 +344,17 @@ static inline void mp4read_seek(mp4read *m, ffuint64 sample)
 	(m)->err = (e),  MP4READ_ERROR
 
 /**
-Return 0 on success
- enum MP4READ_R on error */
-static inline int _mp4_box_process(mp4read *m, ffstr *data)
+Return 0 or MP4READ_TAG on success;
+	MP4READ_ERROR on error */
+static inline int _mp4_box_process(mp4read *m, ffstr sbox)
 {
-	ffstr sbox = *data;
-	int r;
+	int r, rc = 0, rd;
 	struct mp4_box *box = &m->boxes[m->ictx];
+	rd = MP4_GET_MINSIZE(box->type);
 
-	int rd = (box->ctx == NULL) ? box->size : MP4_GET_MINSIZE(box->type);
+	if (box->type & MP4_F_FULLBOX)
+		box->size -= 4;
+	ffstr_shift(&sbox, box->osize - box->size);
 
 	switch (MP4_GET_TYPE(box->type)) {
 
@@ -370,7 +367,7 @@ static inline int _mp4_box_process(mp4read *m, ffstr *data)
 		break;
 
 	case BOX_MDHD: {
-		const struct mp4_mdhd0 *mdhd = (struct mp4_mdhd0*)data->ptr;
+		const struct mp4_mdhd0 *mdhd = (struct mp4_mdhd0*)sbox.ptr;
 		m->curtrack->audio.format.rate = ffint_be_cpu32_ptr(mdhd->timescale);
 		break;
 	}
@@ -470,16 +467,10 @@ static inline int _mp4_box_process(mp4read *m, ffstr *data)
 		r = mp4_ilst_data_read(sbox.ptr, sbox.len, MP4_GET_TYPE(parent->type) - _BOX_TAG, &m->tagval, m->tagbuf, sizeof(m->tagbuf));
 		if (r == 0)
 			break;
-		else if (r == -1) {
-			m->state = 6 /*R_TRKTOTAL*/;
-			break;
-		}
 
 		m->tag = r;
-		m->state = 2 /*R_BOXSKIP*/;
-		if (r == MMTAG_TRACKNO)
-			m->state = 6 /*R_TRKTOTAL*/;
-		return MP4READ_TAG;
+		rc = MP4READ_TAG;
+		break;
 	}
 
 	case BOX_ITUNES_NAME:
@@ -495,10 +486,8 @@ static inline int _mp4_box_process(mp4read *m, ffstr *data)
 	}
 
 	// skip processed data
-	rd = ffmin(rd, data->len);
-	ffstr_shift(data, rd);
 	box->size -= rd;
-	return 0;
+	return rc;
 }
 
 static inline int _mp4_trak_closed(mp4read *m)
@@ -549,10 +538,10 @@ Return enum MP4READ_R */
 static inline int mp4read_process(mp4read *m, ffstr *input, ffstr *output)
 {
 	enum {
-		R_BOXREAD, R_BOX_PARSE, R_BOXSKIP=2, R_BOXPROCESS,
-		R_GATHER, R_GATHER_MORE,
-		R_TRKTOTAL=6,
-		R_DATA, R_DATAREAD, R_DATAOK,
+		R_BOXREAD, R_BOX_PARSE, R_BOXSKIP, R_BOXPROCESS,
+		R_GATHER,
+		R_TRKTOTAL,
+		R_DATA, R_DATAREAD,
 	};
 	struct mp4_box *box;
 	int r;
@@ -563,29 +552,20 @@ static inline int mp4read_process(mp4read *m, ffstr *input, ffstr *output)
 
 		switch (m->state) {
 
-		case R_GATHER_MORE:
-			if (m->buf.ptr == m->chunk.ptr)
-				m->buf.len = m->chunk.len;
-			else
-				ffvec_add2T(&m->buf, &m->chunk, char);
-			m->state = R_GATHER;
-			// fallthrough
-
-		case R_GATHER:
-			r = ffstr_gather((ffstr*)&m->buf, &m->buf.cap, input->ptr, input->len, m->gather_size, &m->chunk);
-			if (r < 0)
-				return _MP4R_ERR(m, MP4READ_EMEM);
-			ffstr_shift(input, r);
-			m->off += r;
-			if (m->chunk.len == 0)
-				return MP4READ_MORE;
-			m->buf.len = 0;
-			m->state = m->nextstate;
+		case R_BOXREAD:
+			m->state = R_GATHER,  m->nextstate = R_BOX_PARSE,  m->gather_size = sizeof(struct mp4box);
 			continue;
 
-		case R_BOXREAD:
-			m->gather_size = sizeof(struct mp4box);
-			m->state = R_GATHER,  m->nextstate = R_BOX_PARSE;
+		case R_GATHER:
+			if (ffstream_realloc(&m->stream, m->gather_size))
+				return _MP4R_ERR(m, MP4READ_EMEM);
+			r = ffstream_gather(&m->stream, *input, m->gather_size, &m->chunk);
+			ffstr_shift(input, r);
+			m->off += r;
+			if (m->chunk.len < m->gather_size)
+				return MP4READ_MORE;
+			m->chunk.len = m->gather_size;
+			m->state = m->nextstate;
 			continue;
 
 		case R_BOX_PARSE: {
@@ -593,8 +573,7 @@ static inline int mp4read_process(mp4read *m, ffstr *input, ffstr *output)
 			box = &m->boxes[m->ictx + 1];
 			r = _mp4_box_parse(m, parent, box, &m->chunk);
 			if (r == -1) {
-				m->gather_size = sizeof(struct mp4box64);
-				m->state = R_GATHER_MORE,  m->nextstate = R_BOX_PARSE;
+				m->state = R_GATHER,  m->nextstate = R_BOX_PARSE,  m->gather_size = sizeof(struct mp4box64);
 				continue;
 			}
 			FF_ASSERT(m->ictx != FF_COUNT(m->boxes));
@@ -620,12 +599,11 @@ static inline int mp4read_process(mp4read *m, ffstr *input, ffstr *output)
 			if (box->type & MP4_F_FULLBOX)
 				minsize += sizeof(struct mp4_fullbox);
 			if (box->size < minsize)
-				return _MP4R_ERR(m, MP4READ_ESMALL);
+				return _MP4R_ERR(m, MP4READ_ESIZE);
 			if (box->type & MP4_F_WHOLE)
 				minsize = box->size;
-			if (minsize != 0 && m->chunk.len == 0) {
-				m->gather_size = minsize;
-				m->state = R_GATHER,  m->nextstate = R_BOXPROCESS;
+			if (minsize != 0) {
+				m->state = R_GATHER,  m->nextstate = R_BOXPROCESS,  m->gather_size += minsize;
 				continue;
 			}
 
@@ -633,44 +611,46 @@ static inline int mp4read_process(mp4read *m, ffstr *input, ffstr *output)
 		}
 			// fallthrough
 
-		case R_BOXPROCESS: {
-			if (box->type & MP4_F_FULLBOX) {
-				ffstr_shift(&m->chunk, sizeof(struct mp4_fullbox));
-				box->size -= sizeof(struct mp4_fullbox);
-			}
-
-			if (0 != (r = _mp4_box_process(m, &m->chunk)))
-				return r;
-
-			if (m->state == R_TRKTOTAL)
-				continue;
-
-			if (box->ctx == NULL)
-				m->state = R_BOXSKIP;
-			else if (m->chunk.len != 0)
-				m->state = R_BOX_PARSE;
-			else
-				m->state = R_BOXREAD;
-			continue;
-		}
-
-		case R_BOXSKIP:
-			if (box->size != 0) {
-				if (m->chunk.len != 0) {
-					ffstr_shift(&m->chunk, box->size);
-
-				} else if (input->len < box->size) {
-					m->off += box->size;
-					box->size = 0;
-					return MP4READ_SEEK;
-
-				} else {
-					ffstr_shift(input, box->size);
-					m->off += box->size;
+		case R_BOXPROCESS:
+			r = _mp4_box_process(m, m->chunk);
+			if (r == MP4READ_ERROR)
+				return MP4READ_ERROR;
+			ffstream_consume(&m->stream, box->osize - box->size);
+			m->state = (box->ctx == NULL) ? R_BOXSKIP : R_BOXREAD;
+			if (r == MP4READ_TAG) {
+				if (m->tag == MMTAG_TRACKNO) {
+					ffstr_splitby(&m->tagval, '/', &m->tagval, &m->tag_trktotal);
+					m->state = R_TRKTOTAL;
+					if (m->tagval.len == 1 && m->tagval.ptr[0] == '0')
+						continue;
 				}
+				return MP4READ_TAG;
 			}
+			continue;
 
-			m->state = (m->chunk.len == 0) ? R_BOXREAD : R_BOX_PARSE;
+		case R_TRKTOTAL:
+			m->state = R_BOXSKIP;
+			if (!(m->tag_trktotal.len == 1 && m->tag_trktotal.ptr[0] == '0')) {
+				m->tag = MMTAG_TRACKTOTAL;
+				m->tagval = m->tag_trktotal;
+				return MP4READ_TAG;
+			}
+			continue;
+
+		case R_BOXSKIP: {
+			m->state = R_BOXREAD;
+
+			int seek = 0;
+			if (box->size != 0) {
+				if (ffstream_used(&m->stream) >= box->size) {
+					ffstream_consume(&m->stream, box->size);
+				} else {
+					m->off += box->size - ffstream_used(&m->stream);
+					ffstream_reset(&m->stream);
+					seek = 1;
+				}
+				box->size = 0;
+			}
 
 			for (;;) {
 				int t = MP4_GET_TYPE(m->boxes[m->ictx].type);
@@ -696,20 +676,13 @@ static inline int mp4read_process(mp4read *m, ffstr *input, ffstr *output)
 				if (r != 0)
 					break;
 			}
+
+			if (seek)
+				return MP4READ_SEEK;
+
 			continue;
+		}
 
-		case R_TRKTOTAL:
-			m->state = R_BOXSKIP;
-			r = mp4_ilst_trkn_read(m->chunk.ptr, &m->tagval, m->tagbuf, sizeof(m->tagbuf));
-			if (r == 0)
-				continue;
-			m->tag = r;
-			return MP4READ_TAG;
-
-
-		case R_DATAOK:
-			m->state = R_DATA;
-			// fallthrough
 
 		case R_DATA: {
 			if (m->seek_sample >= 0) {
@@ -724,10 +697,11 @@ static inline int mp4read_process(mp4read *m, ffstr *input, ffstr *output)
 				return MP4READ_DONE;
 			ffuint64 off = _mp4_data((void*)m->curtrack->chunktab.ptr, (void*)m->curtrack->sktab.ptr, m->curtrack->isamp, &m->frsize, &m->cursample);
 			m->curtrack->isamp++;
-			m->gather_size = m->frsize;
-			m->state = R_GATHER,  m->nextstate = R_DATAREAD;
-			if (off != m->off) {
+			m->state = R_GATHER,  m->nextstate = R_DATAREAD,  m->gather_size = m->frsize;
+			ffuint64 cur_off = m->off - ffstream_used(&m->stream);
+			if (off != cur_off) {
 				m->off = off;
+				ffstream_reset(&m->stream);
 				return MP4READ_SEEK;
 			}
 			continue;
@@ -735,13 +709,14 @@ static inline int mp4read_process(mp4read *m, ffstr *input, ffstr *output)
 
 		case R_DATAREAD: {
 			ffstr_set(output, m->chunk.ptr, m->frsize);
-			m->state = R_DATAOK;
+			m->state = R_DATA;
 
 			const struct mp4_seekpt *pts = m->curtrack->sktab.ptr;
-			ffuint64 fr_off = m->off - m->frsize;
-			_mp4read_log(m, "fr#%u  size:%u  data-chunk:%u  audio-pos:%U  off:%U"
+			ffuint64 fr_off = m->off - ffstream_used(&m->stream);
+			_mp4read_log(m, "fr#%u  size:%u  data-chunk:%u  audio-pos:%U  off:%xU"
 				, m->curtrack->isamp - 1, m->frsize, pts[m->curtrack->isamp - 1].chunk_id, m->cursample, fr_off);
 
+			ffstream_consume(&m->stream, m->gather_size);
 			return MP4READ_DATA;
 		}
 

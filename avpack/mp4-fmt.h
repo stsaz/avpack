@@ -25,7 +25,7 @@ MAPS:
 META:
 	mp4_ilst_find
 	mp4_ilst_data_read mp4_ilst_data_write
-	mp4_ilst_trkn_read mp4_ilst_trkn_data_write
+	mp4_ilst_trkn_data_write
 	mp4_itunes_smpb_read mp4_itunes_smpb_write
 */
 
@@ -866,8 +866,7 @@ struct mp4_disk {
 
 /** Process "ilst.*.data" box.
 Return enum MMTAG;
-  0 on error;
-  -1: trackno tag. */
+  0 on error. */
 static inline int mp4_ilst_data_read(const char *data, ffuint len, ffuint parent_type, ffstr *tagval, char *tagbuf, ffsize tagbuf_cap)
 {
 	const struct mp4_ilst_data *d = (struct mp4_ilst_data*)data;
@@ -881,11 +880,9 @@ static inline int mp4_ilst_data_read(const char *data, ffuint len, ffuint parent
 			return 0;
 
 		const struct mp4_trkn *trkn = (struct mp4_trkn*)data;
-		int num = ffint_be_cpu16_ptr(trkn->num);
-		if (num == 0)
-			return -1;
-		int n = ffs_fromint(num, tagbuf, tagbuf_cap, 0);
-		ffstr_set(tagval, tagbuf, n);
+		tagval->ptr = tagbuf;
+		tagval->len = ffs_format_r0(tagbuf, tagbuf_cap, "%u/%u"
+			, ffint_be_cpu16_ptr(trkn->num), ffint_be_cpu16_ptr(trkn->total));
 		return MMTAG_TRACKNO;
 	}
 
@@ -916,18 +913,6 @@ static inline int mp4_ilst_data_read(const char *data, ffuint len, ffuint parent
 
 	ffstr_set(tagval, data, len);
 	return parent_type;
-}
-
-/** Process total tracks number from "ilst.trkn.data" */
-static inline int mp4_ilst_trkn_read(const char *data, ffstr *tagval, char *tagbuf, ffsize tagbuf_cap)
-{
-	const struct mp4_trkn *trkn = (struct mp4_trkn*)(data + sizeof(struct mp4_ilst_data));
-	ffuint total = ffint_be_cpu16_ptr(trkn->total);
-	if (total == 0)
-		return 0;
-	ffuint n = ffs_fromint(total, tagbuf, tagbuf_cap, 0);
-	ffstr_set(tagval, tagbuf, n);
-	return MMTAG_TRACKTOTAL;
 }
 
 static const struct mp4_bbox mp4_ctx_ilst[];
@@ -1120,11 +1105,11 @@ static const struct mp4_bbox mp4_ctx_alac[] = {
 	{"alac", BOX_ALAC | MP4_F_FULLBOX | MP4_F_REQ | MP4_F_WHOLE | MP4_MINSIZE(sizeof(struct mp4_alac)) | MP4_F_LAST, NULL},
 };
 static const struct mp4_bbox mp4_ctx_mp4a[] = {
-	{"esds", BOX_ESDS | MP4_F_FULLBOX, NULL},
+	{"esds", BOX_ESDS | MP4_F_FULLBOX | MP4_F_WHOLE, NULL},
 	{"wave", BOX_ANY | MP4_F_RO | MP4_F_LAST, mp4_ctx_mp4a_wave},
 };
 static const struct mp4_bbox mp4_ctx_mp4a_wave[] = {
-	{"esds", BOX_ESDS | MP4_F_FULLBOX | MP4_F_LAST, NULL},
+	{"esds", BOX_ESDS | MP4_F_FULLBOX | MP4_F_WHOLE | MP4_F_LAST, NULL},
 };
 
 static const struct mp4_bbox mp4_ctx_udta[] = {

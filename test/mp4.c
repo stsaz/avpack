@@ -5,6 +5,8 @@
 #include <avpack/mp4-read.h>
 #include <avpack/mp4-write.h>
 #include <test/test.h>
+#include <ffbase/mem-print.h>
+extern int Verbose;
 
 struct tag {
 	ffuint name;
@@ -16,6 +18,7 @@ static const struct tag tags[] = {
 	{ MMTAG_DATE, "date" },
 	{ MMTAG_TITLE, "title" },
 	{ MMTAG_TRACKNO, "1" },
+	{ MMTAG_TRACKTOTAL, "2" },
 };
 
 ffvec test_mp4_write()
@@ -131,6 +134,7 @@ void test_mp4_read(ffstr data, int partial)
 			break;
 
 		default:
+			xlog("%s", mp4read_error(&m));
 			x(0);
 		}
 	}
@@ -161,7 +165,7 @@ next:
 			break;
 
 		default:
-			// mp4read_error
+			xlog("%s", mp4read_error(&m));
 			x(0);
 		}
 	}
@@ -176,6 +180,12 @@ void test_mp4()
 {
 	ffvec buf = {};
 	buf = test_mp4_write();
+
+	if (Verbose) {
+		ffstr s = ffmem_alprint(buf.ptr, buf.len, FFMEM_PRINT_ZEROSPACE);
+		xlog("%S", &s);
+		ffstr_free(&s);
+	}
 
 	ffstr data = FFSTR_INITSTR(&buf);
 	test_mp4_read(data, 0);
