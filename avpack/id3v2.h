@@ -738,7 +738,7 @@ static inline int id3v2write_add_txxx(struct id3v2write *w, ffstr name, ffstr da
 static inline int id3v2write_finish(struct id3v2write *w, ffsize padding)
 {
 	if (w->trackno[0] != '\0' || w->tracktotal[0] != '\0') {
-		if (0 != _id3v2write_addframe(w, "TRCK", FFSTR_Z(""), _id3v2_trackno(w), 1))
+		if (_id3v2write_addframe(w, "TRCK", FFSTR_Z(""), _id3v2_trackno(w), ID3V2_ANSI))
 			return -1;
 	}
 
