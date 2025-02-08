@@ -253,7 +253,7 @@ static inline int _mp4_box_parse(mp4read *m, struct mp4_box *parent, struct mp4_
 	if (sizeof(*b) > data->len)
 		return -1;
 
-	ffuint sz = ffint_be_cpu32_ptr(b->size);
+	ffuint64 sz = ffint_be_cpu32_ptr(b->size);
 	ffuint box_szof = sizeof(struct mp4box);
 	if (sz == 1) {
 		const struct mp4box64 *b64 = (struct mp4box64*)data->ptr;
