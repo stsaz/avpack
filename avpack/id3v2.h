@@ -12,76 +12,13 @@ id3v2write_add id3v2write_add_txxx
 id3v2write_finish
 */
 
-/** ID3v2 format:
-HEADER [EXT-HDR]
-(FRAME-HEADER  [TEXT-ENCODING]  DATA...)...
-PADDING
-*/
-
 #pragma once
-
+#include <avpack/id3v2-fmt.h>
 #include <avpack/id3v1.h>
 #include <avpack/mmtag.h>
 #include <ffbase/stream.h>
 #include <ffbase/vector.h>
 #include <ffbase/unicode.h>
-
-struct id3v2_hdr {
-	char id3[3]; // "ID3"
-	ffbyte ver[2]; // e.g. \4\0 for v2.4
-	ffbyte flags; // enum ID3V2_HDR_F
-	ffbyte size[4]; // 7-bit bytes
-};
-
-enum ID3V2_HDR_F {
-	ID3V2_HDR_EXT = 0x40, // extended header follows
-	ID3V2_HDR_UNSYNC = 0x80,
-};
-
-struct id3v2_framehdr {
-	char id[4];
-	ffbyte size[4]; // v2.4: 7-bit bytes
-	ffbyte flags[2]; // [1]: enum ID3V2_FRAME_F
-	// unused[4] // if ID3V2_FRAME_DATALEN
-	// ffbyte text_encoding; // enum ID3V2_TXTENC - for ID starting with 'T' or 'COM', or 'APIC'
-};
-
-enum ID3V2_FRAME_F {
-	ID3V2_FRAME_DATALEN = 1, // 4 bytes follow the frame header
-	ID3V2_FRAME_UNSYNC = 2,
-};
-
-struct id3v22_framehdr {
-	char id[3];
-	ffbyte size[3];
-};
-
-enum ID3V2_TXTENC {
-	ID3V2_ANSI,
-	ID3V2_UTF16BOM,
-	ID3V2_UTF16BE,
-	ID3V2_UTF8,
-};
-
-/** Encode integer so that it doesn't contain 0xff byte */
-static inline void _id3v2_int7_write(void *dst, ffuint i)
-{
-	ffuint i7 = (i & 0x0000007f)
-		| ((i & (0x0000007f << 7)) << 1)
-		| ((i & (0x0000007f << 14)) << 2)
-		| ((i & (0x0000007f << 21)) << 3);
-	*(ffuint*)dst = ffint_be_cpu32(i7);
-}
-
-/** Decode integer */
-static inline unsigned _id3v2_int7_read(unsigned i)
-{
-	return ((i & 0x7f000000) >> 3)
-		| ((i & 0x007f0000) >> 2)
-		| ((i & 0x00007f00) >> 1)
-		| (i & 0x0000007f);
-}
-
 
 struct id3v2read {
 	ffuint state, nextstate;
@@ -91,17 +28,13 @@ struct id3v2read {
 	ffstr chunk;
 	ffuint offset;
 
-	ffuint ver;
-	ffuint total_size;
-	ffuint hdr_flags;
+	struct id3v2_hdr hdr;
 
 	ffuint tag; // enum MMTAG
+	struct id3v2_frame frame;
 	ffuint body_off;
-	ffuint txtenc;
-	ffuint frame_flags;
 	const char *error;
 	char error_s[200];
-	char frame_id[5];
 
 	ffuint codepage;
 	ffuint as_is; // return whole frames as-is
@@ -127,8 +60,8 @@ enum ID3V2READ_R {
 	ID3V2READ_ERROR,
 };
 
-#define id3v2read_size(d)  (d)->total_size
-#define id3v2read_version(d)  (d)->ver
+#define id3v2read_size(d)  (d)->hdr.size
+#define id3v2read_version(d)  (d)->hdr.version
 
 #define _ID3V2READ_ERR(d, e) \
 	(d)->error = (e),  ID3V2READ_ERROR
@@ -138,78 +71,20 @@ enum ID3V2READ_R {
 static inline const char* id3v2read_error(struct id3v2read *d)
 {
 	int n = ffs_format(d->error_s, sizeof(d->error_s) - 1, "ID3v2.%u: %s: %s"
-		, d->ver, d->frame_id, d->error);
+		, d->hdr.version, d->frame.id, d->error);
 	if (n <= 0)
 		return d->error;
 	d->error_s[n] = '\0';
 	return d->error_s;
 }
 
-static int _id3v2r_hdr_read(struct id3v2read *d, ffstr data, unsigned *hdr_len)
+static int _id3v2r_frame_read(struct id3v2read *d, ffstr in)
 {
-	if (sizeof(struct id3v2_hdr) + 4 > data.len)
-		return ID3V2READ_ERROR;
-	const struct id3v2_hdr *h = (struct id3v2_hdr*)data.ptr;
-	unsigned n = ffint_be_cpu32_ptr(h->size);
+	int r;
+	if ((r = id3v2_frame_read(&d->frame, in, d->hdr.version)) < 0)
+		return -1;
+	d->body_off = r;
 
-	if (!(!ffmem_cmp(h->id3, "ID3", 3)
-		&& (n & 0x80808080) == 0))
-		return ID3V2READ_NO;
-
-	d->total_size = sizeof(struct id3v2_hdr) + _id3v2_int7_read(n);
-	d->ver = h->ver[0];
-	d->hdr_flags = h->flags;
-
-	switch (d->ver) {
-	case 3:
-		if ((h->flags & ~(ID3V2_HDR_UNSYNC | ID3V2_HDR_EXT)) != 0)
-			return ID3V2READ_NO; // header flags not supported
-
-		if (h->flags & ID3V2_HDR_EXT) {
-			*hdr_len = sizeof(struct id3v2_hdr) + 4 + ffint_be_cpu32_ptr(h + 1);
-			return ID3V2READ_MORE;
-		}
-		break;
-
-	case 2:
-	case 4:
-		if ((h->flags & ~ID3V2_HDR_UNSYNC) != 0)
-			return ID3V2READ_NO; // header flags not supported
-		break;
-
-	default:
-		return ID3V2READ_NO; // version not supported
-	}
-
-	return 0;
-}
-
-/** Replace: FF 00 -> FF */
-static void _id3v2read_unsync(ffvec *buf, ffstr in)
-{
-	ffbyte *out = buf->ptr;
-	ffuint skip0 = 0;
-
-	for (ffsize i = 0;  i < in.len;  i++) {
-
-		if (skip0) {
-			skip0 = 0;
-			out[buf->len++] = 0xff;
-			if (in.ptr[i] == 0)
-				continue;
-		}
-
-		if ((ffbyte)in.ptr[i] == 0xff) {
-			skip0 = 1;
-			continue;
-		}
-
-		out[buf->len++] = in.ptr[i];
-	}
-}
-
-static int _id3v2r_frame_read(struct id3v2read *d, ffstr in, ffuint *framesize)
-{
 	static const char id3v2_frame_str[][4] = {
 		"APIC", // MMTAG_PICTURE // "MIME" \0 TYPE[1] "DESCRIPTION" \0 DATA[]
 		"COMM", // MMTAG_COMMENT
@@ -262,66 +137,17 @@ static int _id3v2r_frame_read(struct id3v2read *d, ffstr in, ffuint *framesize)
 		MMTAG_DATE,
 	};
 
-	const struct id3v2_framehdr *f = (struct id3v2_framehdr*)in.ptr;
 	const void *frames = id3v2_frame_str;
+	unsigned n_frames = FF_COUNT(id3v2_frame_str);
 	const char *tags = id3v2_frame_int;
-	unsigned i, hdr_len = sizeof(struct id3v2_framehdr), n, n_frames = FF_COUNT(id3v2_frame_str);
-	i = hdr_len;
-	ffmem_copy(d->frame_id, in.ptr, 4);
-	n = ffint_be_cpu32_ptr(in.ptr + 4);
-	d->frame_flags = f->flags[1];
-
-	switch (d->ver) {
-	case 2:
-		hdr_len = sizeof(struct id3v22_framehdr);
-		ffmem_copy(d->frame_id, in.ptr, 3);
-		n = ffint_be_cpu24_ptr(in.ptr + 3);
+	if (d->hdr.version == 2) {
 		frames = id3v22_frame_str;
 		n_frames = FF_COUNT(id3v22_frame_str);
 		tags = id3v22_frame_int;
-		break;
-
-	case 3:
-		if (n & 0x80000000)
-			return _ID3V2READ_ERR(d, "corrupt data");
-
-		if (d->frame_flags)
-			return _ID3V2READ_ERR(d, "v3 frame flags not supported");
-		break;
-
-	case 4:
-		if (n & 0x80808080)
-			return _ID3V2READ_ERR(d, "corrupt data");
-		n = _id3v2_int7_read(n);
-
-		if (d->frame_flags & ~(ID3V2_FRAME_DATALEN | ID3V2_FRAME_UNSYNC))
-			return _ID3V2READ_ERR(d, "frame flags not supported");
-
-		if (d->frame_flags & ID3V2_FRAME_DATALEN) {
-			if (4 > n || i + 4 > in.len)
-				return _ID3V2READ_ERR(d, "corrupt data");
-			i += 4;
-		}
-		break;
 	}
 
-	int r = ffcharr_findsorted(frames, n_frames, 4, d->frame_id, 4);
-	int tag = MMTAG_UNKNOWN;
-	if (r >= 0)
-		tag = tags[r];
-
-	d->txtenc = ID3V2_UTF8;
-	if (d->frame_id[0] == 'T'
-		|| tag == MMTAG_COMMENT || tag == MMTAG_LYRICS || tag == MMTAG_PICTURE) {
-		if (i - hdr_len + 1 > n || i + 1 > in.len)
-			return _ID3V2READ_ERR(d, "corrupt data");
-		d->txtenc = (ffbyte)in.ptr[i];
-		i++;
-	}
-
-	d->body_off = i;
-	*framesize = hdr_len + n;
-	return -tag;
+	r = ffcharr_findsorted(frames, n_frames, 4, d->frame.id, 4);
+	return (r >= 0) ? tags[r] : MMTAG_UNKNOWN;
 }
 
 static int _id3v2read_text_decode(struct id3v2read *d, ffstr in, ffstr *out)
@@ -329,7 +155,7 @@ static int _id3v2read_text_decode(struct id3v2read *d, ffstr in, ffstr *out)
 	int r;
 	ffsize n;
 	ffvec *b = &d->text_buf;
-	switch (d->txtenc) {
+	switch (d->frame.encoding) {
 	case ID3V2_UTF8:
 		n = ffutf8_from_utf8(NULL, 0, in.ptr, in.len, 0);
 		if (NULL == ffvec_realloc(b, n, 1))
@@ -417,11 +243,11 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 	for (;;) {
 		switch (d->state) {
 		case R_INIT:
-			d->state = R_GATHER,  d->nextstate = R_HDR,  d->gather_size = sizeof(struct id3v2_hdr) + 4;
+			d->state = R_GATHER,  d->nextstate = R_HDR,  d->gather_size = sizeof(struct id3v2_taghdr) + 4;
 			// fallthrough
 
 		case R_GATHER:
-			if (d->total_size && d->offset + d->gather_size > d->total_size)
+			if (d->hdr.size && d->offset + d->gather_size > d->hdr.size)
 				return _ID3V2READ_ERR(d, "corrupt data");
 			if (ffstream_realloc(&d->stm, d->gather_size))
 				return _ID3V2READ_ERR(d, "not enough memory");
@@ -434,17 +260,18 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 			continue;
 
 		case R_HDR:
-			if ((r = _id3v2r_hdr_read(d, d->chunk, &n))) {
-				if (r == ID3V2READ_MORE) {
-					d->state = R_GATHER,  d->nextstate = R_HDR_EXT,  d->gather_size = n;
-					continue;
-				}
-				return r;
+			if ((r = id3v2_hdr_read(&d->hdr, d->chunk)) < 0) {
+				return ID3V2READ_NO;
 			}
 
-			ffstr_shift(&d->chunk, sizeof(struct id3v2_hdr));
-			ffstream_consume(&d->stm, sizeof(struct id3v2_hdr));
-			d->offset += sizeof(struct id3v2_hdr);
+			if ((unsigned)r > d->chunk.len) {
+				d->state = R_GATHER,  d->nextstate = R_HDR_EXT,  d->gather_size = r;
+				continue;
+			}
+
+			ffstr_shift(&d->chunk, r);
+			ffstream_consume(&d->stm, r);
+			d->offset += r;
 			d->state = R_FR;
 			continue;
 
@@ -453,33 +280,33 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 			ffstream_consume(&d->stm, d->gather_size);
 			d->offset += d->gather_size;
 			d->state = R_FR;
-			continue;
+			// fallthrough
 
 		case R_FR:
-			if (d->offset == d->total_size)
+			if (d->offset == d->hdr.size)
 				return ID3V2READ_DONE;
 
-			d->gather_size = ffmin(sizeof(struct id3v2_framehdr) + 4+1, d->total_size - d->offset);
+			d->gather_size = ffmin(sizeof(struct id3v2_framehdr) + 4+1, d->hdr.size - d->offset);
 			d->state = R_GATHER,  d->nextstate = R_FR_HDR;
 			continue;
 
 		case R_FR_HDR:
 			if (d->chunk.ptr[0] == '\0') {
-				n = ffmin(ffstream_used(&d->stm), d->total_size - d->offset);
+				n = ffmin(ffstream_used(&d->stm), d->hdr.size - d->offset);
 				ffstream_consume(&d->stm, n);
 				d->offset += n;
 				d->state = R_PADDING;
 				continue;
 			}
 
-			if ((r = _id3v2r_frame_read(d, d->chunk, &n)) > 0)
-				return r;
-			d->tag = -r;
-			d->state = R_GATHER,  d->nextstate = R_FR_DATA,  d->gather_size = n;
+			if ((r = _id3v2r_frame_read(d, d->chunk)) < 0)
+				return _ID3V2READ_ERR(d, "couldn't parse frame header");
+			d->tag = r;
+			d->state = R_GATHER,  d->nextstate = R_FR_DATA,  d->gather_size = d->frame.size;
 			continue;
 
 		case R_FR_DATA:
-			if ((d->frame_flags & ID3V2_FRAME_UNSYNC) || (d->hdr_flags & ID3V2_HDR_UNSYNC)) {
+			if ((d->frame.flags & ID3V2_FRAME_UNSYNC) || (d->hdr.flags & ID3V2_HDR_UNSYNC)) {
 				d->unsync_buf.len = 0;
 				if (NULL == ffvec_grow(&d->unsync_buf, d->gather_size, 1))
 					return _ID3V2READ_ERR(d, "not enough memory");
@@ -491,7 +318,7 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 			continue;
 
 		case R_UNSYNC:
-			_id3v2read_unsync(&d->unsync_buf, d->chunk);
+			d->unsync_buf.len = id3v2_data_decode(d->unsync_buf.ptr, d->chunk);
 			d->chunk = *(ffstr*)&d->unsync_buf;
 			d->state = R_DATA;
 			// fallthrough
@@ -499,11 +326,11 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 		case R_DATA: {
 			ffstream_consume(&d->stm, d->gather_size);
 			d->offset += d->gather_size;
-			ffstr_setz(name, d->frame_id);
+			ffstr_setz(name, d->frame.id);
 			d->state = R_FR;
 
 			if (d->as_is
-				&& ffmem_cmp(d->frame_id, "TXXX", 4)) { // TXXX frame must be parsed anyway to determine tag ID
+				&& ffmem_cmp(d->frame.id, "TXXX", 4)) { // TXXX frame must be parsed anyway to determine tag ID
 				*value = d->chunk;
 				return -(int)d->tag;
 			}
@@ -514,7 +341,7 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 			switch (d->tag) {
 			case MMTAG_COMMENT:
 			case MMTAG_LYRICS:
-				_id3v2read_comment_parse(body, d->txtenc, &body);  break;
+				_id3v2read_comment_parse(body, d->frame.encoding, &body);  break;
 
 			case MMTAG_PICTURE:
 				*value = body;
@@ -530,7 +357,7 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 
 			switch (d->tag) {
 			case MMTAG_UNKNOWN:
-				if (!ffmem_cmp(d->frame_id, "TXXX", 4)) { // TXXX ... name \0 value
+				if (!ffmem_cmp(d->frame.id, "TXXX", 4)) { // TXXX ... name \0 value
 					ffstr k, v;
 					if (ffstr_splitby(value, '\0', &k, &v) > 0) {
 						*name = k;
@@ -540,7 +367,7 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 					}
 
 					if (d->as_is) {
-						ffstr_setz(name, d->frame_id);
+						ffstr_setz(name, d->frame.id);
 						*value = d->chunk;
 					}
 				}
@@ -565,17 +392,17 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 		}
 
 		case R_TRKTOTAL:
-			ffstr_setz(name, d->frame_id);
+			ffstr_setz(name, d->frame.id);
 			*value = d->chunk;
 			d->state = R_FR;
 			return -MMTAG_TRACKTOTAL;
 
 		case R_PADDING:
-			if (d->offset == d->total_size)
+			if (d->offset == d->hdr.size)
 				return ID3V2READ_DONE;
 			if (input->len == 0)
 				return ID3V2READ_MORE;
-			n = ffmin(d->total_size - d->offset, input->len);
+			n = ffmin(d->hdr.size - d->offset, input->len);
 			ffstr_shift(input, n);
 			d->offset += n;
 			break;
@@ -595,7 +422,7 @@ struct id3v2write {
 static inline void id3v2write_create(struct id3v2write *w)
 {
 	ffvec_alloc(&w->buf, 1024, 1);
-	w->buf.len = sizeof(struct id3v2_hdr);
+	w->buf.len = sizeof(struct id3v2_taghdr);
 }
 
 static inline void id3v2write_close(struct id3v2write *w)
@@ -605,22 +432,13 @@ static inline void id3v2write_close(struct id3v2write *w)
 
 static int _id3v2write_addframe(struct id3v2write *w, const char *id, ffstr prefix, ffstr data, int encoding)
 {
-	ffsize n = sizeof(struct id3v2_framehdr) + !!(encoding >= 0) + prefix.len + data.len;
+	ffsize n = id3v2_frame_write(NULL, NULL, encoding, 0) + prefix.len + data.len;
 
 	if (NULL == ffvec_grow(&w->buf, n, 1))
 		return -1;
 	char *p = ffslice_end(&w->buf, 1);
 
-	// write frame header
-	struct id3v2_framehdr *fr = (struct id3v2_framehdr*)p;
-	ffmem_copy(fr->id, id, 4);
-	_id3v2_int7_write(fr->size, n - sizeof(*fr));
-	fr->flags[0] = 0,  fr->flags[1] = 0;
-	p += sizeof(*fr);
-
-	if (encoding >= 0)
-		*p++ = encoding;
-
+	p += id3v2_frame_write(p, id, encoding, prefix.len + data.len);
 	p = ffmem_copy(p, prefix.ptr, prefix.len);
 	ffmem_copy(p, data.ptr, data.len);
 
@@ -750,11 +568,6 @@ static inline int id3v2write_finish(struct id3v2write *w, ffsize padding)
 		w->buf.len += padding;
 	}
 
-	// write header
-	struct id3v2_hdr *h = (struct id3v2_hdr*)w->buf.ptr;
-	ffmem_copy(h->id3, "ID3", 3);
-	h->ver[0] = 4,  h->ver[1] = 0;
-	h->flags = 0;
-	_id3v2_int7_write(h->size, w->buf.len - sizeof(*h));
+	id3v2_hdr_write(w->buf.ptr, w->buf.len - sizeof(struct id3v2_taghdr));
 	return 0;
 }
