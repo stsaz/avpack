@@ -496,31 +496,33 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 			d->state = R_DATA;
 			// fallthrough
 
-		case R_DATA:
+		case R_DATA: {
 			ffstream_consume(&d->stm, d->gather_size);
 			d->offset += d->gather_size;
 			ffstr_setz(name, d->frame_id);
 			d->state = R_FR;
 
-			if (d->as_is) {
+			if (d->as_is
+				&& ffmem_cmp(d->frame_id, "TXXX", 4)) { // TXXX frame must be parsed anyway to determine tag ID
 				*value = d->chunk;
 				return -(int)d->tag;
 			}
 
-			ffstr_shift(&d->chunk, d->body_off);
+			ffstr body = d->chunk;
+			ffstr_shift(&body, d->body_off);
 
 			switch (d->tag) {
 			case MMTAG_COMMENT:
 			case MMTAG_LYRICS:
-				_id3v2read_comment_parse(d->chunk, d->txtenc, &d->chunk);  break;
+				_id3v2read_comment_parse(body, d->txtenc, &body);  break;
 
 			case MMTAG_PICTURE:
-				*value = d->chunk;
+				*value = body;
 				return -MMTAG_PICTURE;
 			}
 
-			*value = d->chunk;
-			if ((r = _id3v2read_text_decode(d, d->chunk, value)))
+			*value = body;
+			if ((r = _id3v2read_text_decode(d, body, value)))
 				return r;
 
 			if (value->len && value->ptr[value->len - 1] == '\0')
@@ -533,6 +535,13 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 					if (ffstr_splitby(value, '\0', &k, &v) > 0) {
 						*name = k;
 						*value = v;
+						if (ffstr_eqz(&k, "REPLAYGAIN_TRACK_GAIN"))
+							d->tag = MMTAG_REPLAYGAIN_TRACK_GAIN;
+					}
+
+					if (d->as_is) {
+						ffstr_setz(name, d->frame_id);
+						*value = d->chunk;
 					}
 				}
 				break;
@@ -553,6 +562,7 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 			}
 
 			return -(int)d->tag;
+		}
 
 		case R_TRKTOTAL:
 			ffstr_setz(name, d->frame_id);
