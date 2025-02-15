@@ -538,7 +538,7 @@ static inline void oggread_seek(oggread *o, ffuint64 sample)
 #define oggread_page_num(o)  ((o)->page_num)
 #define oggread_pkt_num(o)  ((o)->pkt_num - 1)
 
-#define oggread_pkt_last(o) ((o)->seg_off == ((struct ogg_hdr*)o->chunk.ptr)->nsegments)
+#define oggread_pkt_last(o) ((o)->seg_off == ((struct ogg_hdr*)(o)->chunk.ptr)->nsegments)
 
 /** Get an absolute file offset to seek */
 #define oggread_offset(o)  ((o)->off)

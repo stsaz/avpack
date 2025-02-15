@@ -96,6 +96,10 @@ static inline int oggwrite_process(oggwrite *o, ffstr *input, ffstr *output, ffu
 			o->page_endpos = endpos;
 			goto fin;
 		}
+
+		if ((flags & OGGWRITE_FFLUSH) && o->page.nsegments != 0)
+			goto flush;
+
 		return OGGWRITE_MORE;
 	}
 
