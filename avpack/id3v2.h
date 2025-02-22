@@ -87,67 +87,52 @@ static int _id3v2r_frame_read(struct id3v2read *d, ffstr in)
 
 	static const char id3v2_frame_str[][4] = {
 		"APIC", // MMTAG_PICTURE // "MIME" \0 TYPE[1] "DESCRIPTION" \0 DATA[]
+		"COM\0", // MMTAG_COMMENT
 		"COMM", // MMTAG_COMMENT
+		"PIC\0", // MMTAG_PICTURE
+		"TAL\0", // MMTAG_ALBUM
 		"TALB", // MMTAG_ALBUM
+		"TCO\0", // MMTAG_GENRE
 		"TCOM", // MMTAG_COMPOSER
 		"TCON", // MMTAG_GENRE // "Genre" | "(NN)Genre" | "(NN)" where NN is ID3v1 genre index
 		"TCOP", // MMTAG_COPYRIGHT
 		"TIT2", // MMTAG_TITLE
+		"TP1\0", // MMTAG_ARTIST
 		"TPE1", // MMTAG_ARTIST
 		"TPE2", // MMTAG_ALBUMARTIST
 		"TPUB", // MMTAG_PUBLISHER
 		"TRCK", // MMTAG_TRACKNO // "N[/TOTAL]"
+		"TRK\0", // MMTAG_TRACKNO
+		"TT2\0", // MMTAG_TITLE
+		"TYE\0", // MMTAG_DATE
 		"TYER", // MMTAG_DATE
 		"USLT", // MMTAG_LYRICS
 	};
 	static const char id3v2_frame_int[] = {
 		MMTAG_PICTURE,
 		MMTAG_COMMENT,
+		MMTAG_COMMENT,
+		MMTAG_PICTURE,
 		MMTAG_ALBUM,
+		MMTAG_ALBUM,
+		MMTAG_GENRE,
 		MMTAG_COMPOSER,
 		MMTAG_GENRE,
 		MMTAG_COPYRIGHT,
 		MMTAG_TITLE,
 		MMTAG_ARTIST,
+		MMTAG_ARTIST,
 		MMTAG_ALBUMARTIST,
 		MMTAG_PUBLISHER,
 		MMTAG_TRACKNO,
-		MMTAG_DATE,
-		MMTAG_LYRICS,
-	};
-
-	static const char id3v22_frame_str[][4] = {
-		"COM\0", // MMTAG_COMMENT
-		"PIC\0", // MMTAG_PICTURE
-		"TAL\0", // MMTAG_ALBUM
-		"TCO\0", // MMTAG_GENRE
-		"TP1\0", // MMTAG_ARTIST
-		"TRK\0", // MMTAG_TRACKNO
-		"TT2\0", // MMTAG_TITLE
-		"TYE\0", // MMTAG_DATE
-	};
-	static const char id3v22_frame_int[] = {
-		MMTAG_COMMENT,
-		MMTAG_PICTURE,
-		MMTAG_ALBUM,
-		MMTAG_GENRE,
-		MMTAG_ARTIST,
 		MMTAG_TRACKNO,
 		MMTAG_TITLE,
 		MMTAG_DATE,
+		MMTAG_DATE,
+		MMTAG_LYRICS,
 	};
-
-	const void *frames = id3v2_frame_str;
-	unsigned n_frames = FF_COUNT(id3v2_frame_str);
-	const char *tags = id3v2_frame_int;
-	if (d->hdr.version == 2) {
-		frames = id3v22_frame_str;
-		n_frames = FF_COUNT(id3v22_frame_str);
-		tags = id3v22_frame_int;
-	}
-
-	r = ffcharr_findsorted(frames, n_frames, 4, d->frame.id, 4);
-	return (r >= 0) ? tags[r] : MMTAG_UNKNOWN;
+	r = ffcharr_findsorted(id3v2_frame_str, FF_COUNT(id3v2_frame_str), 4, d->frame.id, 4);
+	return (r >= 0) ? id3v2_frame_int[r] : MMTAG_UNKNOWN;
 }
 
 static int _id3v2read_text_decode(struct id3v2read *d, ffstr in, ffstr *out)

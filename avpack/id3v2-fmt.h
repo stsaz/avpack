@@ -212,13 +212,9 @@ static inline int id3v2_frame_read(struct id3v2_frame *f, ffstr data, unsigned v
 	f->encoding = ID3V2_ANSI;
 	id = *(unsigned*)f->id;
 	if (data.ptr[0] == 'T'
-		|| (version != 2
-			&& (id == *(unsigned*)"APIC"
-				|| id == *(unsigned*)"COMM"
-				|| id == *(unsigned*)"USLT"))
-		|| (version == 2
-			&& (id == *(unsigned*)"COM\0"
-				|| id == *(unsigned*)"PIC\0"))) {
+		|| id == *(unsigned*)"APIC" || id == *(unsigned*)"PIC\0"
+		|| id == *(unsigned*)"COMM" || id == *(unsigned*)"COM\0"
+		|| id == *(unsigned*)"USLT") {
 		if (i - hdr_len + 1 > n || i + 1 > data.len)
 			return -1;
 		f->encoding = (ffbyte)data.ptr[i];
