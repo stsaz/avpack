@@ -137,6 +137,10 @@ static int mkv_int_ntoh(ffuint64 *dst, const char *d, ffsize len)
 		*dst = ffint_be_cpu24_ptr(d);  break;
 	case 4:
 		*dst = ffint_be_cpu32_ptr(d);  break;
+	case 5:
+		*dst = ffint_be_cpu32_ptr(d);
+		*dst |= (ffuint64)(ffbyte)d[4] << 32;
+		break;
 	case 8:
 		*dst = ffint_be_cpu64_ptr(d);  break;
 	default:
@@ -556,7 +560,7 @@ static const struct mkv_binel mkv_ctx_seek[] = {
 };
 static const struct mkv_binel mkv_ctx_seekpt[] = {
 	{ 0x53ab, MKV_T_SEEKID | MKV_F_INT, NULL },
-	{ 0x53ac, MKV_T_SEEKPOS | MKV_F_INT | MKV_F_LAST, NULL },
+	{ 0x53ac, MKV_T_SEEKPOS | MKV_F_INT8 | MKV_F_LAST, NULL },
 };
 
 static const struct mkv_binel mkv_ctx_tracks[] = {
