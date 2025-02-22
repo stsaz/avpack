@@ -13,12 +13,8 @@ wvread_cursample
 wvread_tag
 */
 
-/* .wv format:
-("wvpk" INFO DATA)... [APETAG] [ID3v1]
-*/
-
 #pragma once
-
+#include <avpack/wv-fmt.h>
 #include <avpack/id3v1.h>
 #include <avpack/apetag.h>
 #include <avpack/shared.h>
@@ -26,6 +22,10 @@ wvread_tag
 
 struct wvread_info {
 	ffuint total_samples;
+	ffuint bits;
+	ffuint flt;
+	ffuint channels;
+	ffuint sample_rate;
 };
 
 struct wv_seekpoint {
@@ -114,50 +114,6 @@ static inline void _wvr_log(wvread *w, const char *fmt, ...)
 	va_end(va);
 }
 
-struct wv_hdr {
-	ffuint size;
-	ffuint total_samples;
-	ffuint index;
-	ffuint samples;
-};
-
-struct wv_hdr_fmt {
-	char id[4]; // "wvpk"
-	ffbyte size[4];
-
-	ffbyte version[2]; // "XX 04"
-	ffbyte unused[2];
-	ffbyte total_samples[4];
-	ffbyte index[4];
-	ffbyte samples[4];
-	ffbyte flags[4];
-	ffbyte crc[4];
-};
-
-/** Parse header
-Return bytes processed
-  0: more data is needed
-  <0: error */
-static int wv_parse(struct wv_hdr *hdr, const char *data, ffsize len)
-{
-	if (sizeof(struct wv_hdr_fmt) > len)
-		return 0;
-
-	const struct wv_hdr_fmt *h = (struct wv_hdr_fmt*)data;
-	if (ffmem_cmp(h->id, "wvpk", 4))
-		return -1;
-
-	hdr->size = ffint_le_cpu32_ptr(h->size) + 8;
-	hdr->total_samples = ffint_le_cpu32_ptr(h->total_samples);
-	hdr->index = ffint_le_cpu32_ptr(h->index);
-	hdr->samples = ffint_le_cpu32_ptr(h->samples);
-
-	if (hdr->size < sizeof(struct wv_hdr_fmt))
-		return -1;
-
-	return sizeof(struct wv_hdr_fmt);
-}
-
 /** Search for wvpk header inside the buffer
 Return header position
   <0 if not found */
@@ -174,7 +130,7 @@ static ffssize wv_blk_find(ffstr data, struct wv_hdr *h)
 			i += r;
 		}
 
-		if (sizeof(struct wv_hdr_fmt) == wv_parse(h, &d[i], len - i))
+		if (sizeof(struct wv_hdr_fmt) == wv_hdr_read(h, &d[i], len - i))
 			return i;
 	}
 
@@ -313,7 +269,12 @@ static inline int wvread_process(wvread *w, ffstr *input, ffstr *output)
 			if (!w->hdr_ok) {
 				w->hdr_ok = 1;
 				w->info.total_samples = h.total_samples;
+				w->info.bits = h.bits;
+				w->info.flt = h.flt;
+				w->info.channels = h.channels;
+				w->info.sample_rate = h.sample_rate;
 			}
+
 			w->block_index = h.index;
 			w->block_samples = h.samples;
 
