@@ -13,7 +13,7 @@ bmpread_seek_offset
 
 #pragma once
 
-#include <avpack/bmp-fmt.h>
+#include <avpack/base/bmp.h>
 #include <ffbase/vector.h>
 
 struct bmp_info {

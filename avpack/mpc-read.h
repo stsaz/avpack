@@ -14,16 +14,8 @@ mpcread_error
 mpcread_cursample
 */
 
-/* .mpc format:
-MPCK BLOCK(SH RG EI SO AP(FRAME...)... ST SE)...
-
-block:
- byte id[2]
- varint size // id & size included
-*/
-
 #pragma once
-
+#include <avpack/base/mpc.h>
 #include <avpack/apetag.h>
 #include <ffbase/vector.h>
 #include <avpack/shared.h>
@@ -33,14 +25,6 @@ enum MPCREAD_O {
 };
 
 typedef void (*mpc_log_t)(void *udata, const char *fmt, va_list va);
-
-struct mpcread_info {
-	ffuint sample_rate;
-	ffuint channels;
-	ffuint64 total_samples;
-	ffuint64 delay;
-	ffuint frame_samples;
-};
 
 typedef struct mpcread {
 	ffuint state;
@@ -138,76 +122,6 @@ static int _mpcr_block_id(const char *name)
 	if (r < 0)
 		return 0;
 	return 0x100 | r;
-}
-
-/** Read MPC integer
-Format: (0x80 | x)... x
-Return N bytes read
-  <0: need more data */
-static int _mpc_int(const void *p, ffsize len, ffuint64 *n)
-{
-	const ffbyte *d = p;
-	ffuint i;
-	ffuint64 r = 0;
-	len = ffmin(len, 8);
-
-	for (i = 0;  ;  i++) {
-		if (i == len)
-			return -1;
-
-		r = (r << 7) | (d[i] & ~0x80);
-
-		if (!(d[i] & 0x80)) {
-			i++;
-			break;
-		}
-	}
-
-	*n = r;
-	return i;
-}
-
-/* SH block:
-byte crc[4]
-byte ver //8
-varint samples
-varint delay
-byte rate :3
-byte max_band :5 // +1
-byte channels :4 // +1
-byte midside_stereo :1
-byte block_frames_pwr :3 // block_frames = 2^(2*x)
-*/
-static int _mpcr_sh_read(mpcread *m, ffstr body)
-{
-	int n;
-	ffuint i = 0;
-	const ffbyte *d = (ffbyte*)body.ptr;
-
-	if (4 + 1 > body.len)
-		return _MPCR_ERR(m, "bad SH block");
-	i += 4;
-
-	if (d[i] != 8)
-		return _MPCR_ERR(m, "unsupported version");
-	i++;
-
-	if (0 > (n = _mpc_int(&d[i], body.len - i, &m->info.total_samples)))
-		return _MPCR_ERR(m, "bad SH block");
-	i += n;
-
-	if (0 > (n = _mpc_int(&d[i], body.len - i, &m->info.delay)))
-		return _MPCR_ERR(m, "bad SH block");
-	i += n;
-
-	if (i + 2 > body.len)
-		return _MPCR_ERR(m, "bad SH block");
-
-	static const ffushort mpc_rates[] = { 44100, 48000, 37800, 32000 };
-	m->info.sample_rate = mpc_rates[(d[i] & 0xe0) >> 5];
-	m->info.channels = ((d[i+1] & 0xf0) >> 4) + 1;
-	m->info.frame_samples = (36 * 32) << (2 * (d[i+1] & 0x07));
-	return 0;
 }
 
 /* EI block:
@@ -371,7 +285,7 @@ static inline int mpcread_process(mpcread *m, ffstr *input, ffstr *output)
 			continue;
 
 		case R_BLOCK_HDR:
-			r = _mpc_int(&m->chunk.ptr[2], m->chunk.len - 2, &m->blk_size);
+			r = mpc_int_read(&m->chunk.ptr[2], m->chunk.len - 2, &m->blk_size);
 			if (r < 0) {
 				if (m->chunk.len == BLKHDR_MINSIZE) {
 					m->state = R_GATHER_MORE,  m->nextstate = R_BLOCK_HDR,  m->gather_size = BLKHDR_MAXSIZE;
@@ -460,8 +374,8 @@ static inline int mpcread_process(mpcread *m, ffstr *input, ffstr *output)
 			continue;
 
 		case R_SH:
-			if (0 != (r = _mpcr_sh_read(m, m->chunk)))
-				return r;
+			if (mpc_sh_read(&m->info, m->chunk.ptr, m->chunk.len) <= 0)
+				return _MPCR_ERR(m, "bad SH block");
 
 			ffmem_copy(m->sh_block, m->chunk.ptr, m->chunk.len);
 			m->sh_block_len = m->chunk.len;
@@ -478,7 +392,7 @@ static inline int mpcread_process(mpcread *m, ffstr *input, ffstr *output)
 			/* SO block:
 			varint ST_block_offset
 			*/
-			if (0 > (r = _mpc_int(m->chunk.ptr, m->chunk.len, &m->ST_off)))
+			if (0 > (r = mpc_int_read(m->chunk.ptr, m->chunk.len, &m->ST_off)))
 				return _MPCR_ERR(m, "bad SO block");
 			m->ST_off += m->blk_off;
 			m->state = R_NXTBLOCK;

@@ -57,17 +57,17 @@ enum ID3V2_TXTENC {
 
 
 /** Encode integer so that it doesn't contain 0xff byte */
-static inline void _id3v2_int7_write(void *dst, unsigned i)
+static inline void _id3v2_int7_write(void *dst, ffuint i)
 {
-	unsigned i7 = (i & 0x0000007f)
+	ffuint i7 = (i & 0x0000007f)
 		| ((i & (0x0000007f << 7)) << 1)
 		| ((i & (0x0000007f << 14)) << 2)
 		| ((i & (0x0000007f << 21)) << 3);
-	*(unsigned*)dst = ffint_be_cpu32(i7);
+	*(ffuint*)dst = ffint_be_cpu32(i7);
 }
 
 /** Decode integer */
-static inline unsigned _id3v2_int7_read(unsigned i)
+static inline ffuint _id3v2_int7_read(ffuint i)
 {
 	if (i & 0x80808080)
 		return ~0U;
@@ -78,10 +78,10 @@ static inline unsigned _id3v2_int7_read(unsigned i)
 }
 
 /** Replace: FF 00 -> FF */
-static inline unsigned id3v2_data_decode(void *dst, ffstr in)
+static inline ffuint id3v2_data_decode(void *dst, ffstr in)
 {
 	char *p = dst;
-	unsigned skip0 = 0;
+	ffuint skip0 = 0;
 
 	for (size_t i = 0;  i < in.len;  i++) {
 
@@ -104,9 +104,9 @@ static inline unsigned id3v2_data_decode(void *dst, ffstr in)
 
 
 struct id3v2_hdr {
-	unsigned version;
-	unsigned flags;
-	unsigned size;
+	ffuint version;
+	ffuint flags;
+	ffuint size;
 };
 
 /**
@@ -117,7 +117,7 @@ static inline int id3v2_hdr_read(struct id3v2_hdr *h, ffstr data)
 	if (sizeof(struct id3v2_taghdr) + 4 > data.len)
 		return -1;
 	const struct id3v2_taghdr *th = (struct id3v2_taghdr*)data.ptr;
-	unsigned n;
+	ffuint n;
 
 	if (!(!ffmem_cmp(data.ptr, "ID3", 3)
 		&& ~0U != (n = _id3v2_int7_read(ffint_be_cpu32_ptr(th->size)))))
@@ -149,7 +149,7 @@ static inline int id3v2_hdr_read(struct id3v2_hdr *h, ffstr data)
 	return sizeof(struct id3v2_taghdr);
 }
 
-static inline unsigned id3v2_hdr_write(void *dst, unsigned data_len)
+static inline ffuint id3v2_hdr_write(void *dst, ffuint data_len)
 {
 	char *p = dst;
 	ffmem_copy(p, "ID3\x04\x00", 5);
@@ -161,18 +161,18 @@ static inline unsigned id3v2_hdr_write(void *dst, unsigned data_len)
 
 struct id3v2_frame {
 	char id[5];
-	unsigned flags;
-	unsigned encoding;
-	unsigned size;
+	ffuint flags;
+	ffuint encoding;
+	ffuint size;
 };
 
 /**
 Return N of bytes read;
 	<0: error */
-static inline int id3v2_frame_read(struct id3v2_frame *f, ffstr data, unsigned version)
+static inline int id3v2_frame_read(struct id3v2_frame *f, ffstr data, ffuint version)
 {
 	const struct id3v2_framehdr *h = (struct id3v2_framehdr*)data.ptr;
-	unsigned id, i, hdr_len = sizeof(struct id3v2_framehdr), n;
+	ffuint id, i, hdr_len = sizeof(struct id3v2_framehdr), n;
 	i = hdr_len;
 	ffmem_copy(f->id, data.ptr, 4);
 	n = ffint_be_cpu32_ptr(data.ptr + 4);
@@ -210,11 +210,11 @@ static inline int id3v2_frame_read(struct id3v2_frame *f, ffstr data, unsigned v
 	}
 
 	f->encoding = ID3V2_ANSI;
-	id = *(unsigned*)f->id;
+	id = *(ffuint*)f->id;
 	if (data.ptr[0] == 'T'
-		|| id == *(unsigned*)"APIC" || id == *(unsigned*)"PIC\0"
-		|| id == *(unsigned*)"COMM" || id == *(unsigned*)"COM\0"
-		|| id == *(unsigned*)"USLT") {
+		|| id == *(ffuint*)"APIC" || id == *(ffuint*)"PIC\0"
+		|| id == *(ffuint*)"COMM" || id == *(ffuint*)"COM\0"
+		|| id == *(ffuint*)"USLT") {
 		if (i - hdr_len + 1 > n || i + 1 > data.len)
 			return -1;
 		f->encoding = (ffbyte)data.ptr[i];
@@ -225,7 +225,7 @@ static inline int id3v2_frame_read(struct id3v2_frame *f, ffstr data, unsigned v
 	return i;
 }
 
-static inline unsigned id3v2_frame_write(void *dst, const char *id, int encoding, unsigned data_len)
+static inline ffuint id3v2_frame_write(void *dst, const char *id, int encoding, ffuint data_len)
 {
 	if (!dst)
 		return 10 + !!(encoding >= 0);

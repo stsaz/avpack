@@ -15,7 +15,7 @@ mp3write_offset
 #include <ffbase/vector.h>
 #include <avpack/id3v1.h>
 #include <avpack/id3v2.h>
-#include <avpack/mpeg1-fmt.h>
+#include <avpack/base/mpeg1.h>
 
 struct _mp3write_tag {
 	ffuint mmtag;

@@ -14,7 +14,7 @@ wavwrite_finish
 
 #pragma once
 
-#include <avpack/wav-fmt.h>
+#include <avpack/base/wav.h>
 #include <ffbase/vector.h>
 
 typedef struct wavwrite {

@@ -9,16 +9,11 @@ aacread_error
 aacread_offset
 aacread_info
 aacread_frame_samples
-aacadts_parse
-aacadts_match
 aacadts_find
 */
 
-/* .aac format:
-(HDR [CRC] DATA)...
-*/
-
 #pragma once
+#include <avpack/base/adts.h>
 #include <ffbase/stream.h>
 
 
@@ -71,88 +66,10 @@ static inline void aacread_close(aacread *a)
 	ffstream_free(&a->stream);
 }
 
-static ffuint64 _aacadts_bit_read64(ffuint64 val, ffuint *off, ffuint n)
-{
-	val = (val >> (64 - *off - n)) & ((1ULL << n) - 1);
-	*off += n;
-	return val;
-}
-
-static ffuint _aacadts_bit_write32(ffuint val, ffuint *off, ffuint n)
-{
-	val = (val & ((1 << n) - 1)) << (32 - *off - n);
-	*off += n;
-	return val;
-}
-
-struct aacadts_hdr {
-	ffuint aot;
-	ffuint samp_freq_idx;
-	ffuint chan_conf;
-	ffuint framelen;
-	ffuint datalen;
-	ffuint have_crc;
-};
-
-/** Parse 7 bytes of ADTS frame header */
-static int aacadts_parse(struct aacadts_hdr *h, const void *d)
-{
-	enum {
-		H_SYNC = 12, // =0x0fff
-		H_MPEG_ID = 1,
-		H_LAYER = 2, // =0
-		H_PROTECTION_ABSENT = 1,
-		H_PROFILE = 2, // AOT-1
-		H_SAMPLE_FREQ_INDEX = 4, // 0..12
-		H_PRIVATE_BIT = 1,
-		H_CHANNEL_CONFIG = 3,
-		H_ORIGINAL = 1,
-		H_HOME = 1,
-		H_COPYRIGHT_ID = 1,
-		H_COPYRIGHT_START = 1,
-		H_FRAME_LENGTH = 13,
-		H_FULLNESS = 11,
-		H_NUM_RAW_BLOCKS = 2, // AAC frames in ADTS frame (aac-frames = raw-blocks - 1)
-	};
-
-	ffuint off = 0;
-	ffuint64 v = ffint_be_cpu64(*(ffuint64*)d);
-	if (0x0fff != _aacadts_bit_read64(v, &off, H_SYNC))
-		return -1;
-	off += H_MPEG_ID;
-	if (0 != _aacadts_bit_read64(v, &off, H_LAYER))
-		return -1;
-	h->have_crc = !_aacadts_bit_read64(v, &off, H_PROTECTION_ABSENT);
-	h->aot = _aacadts_bit_read64(v, &off, H_PROFILE) + 1;
-	if ((h->samp_freq_idx = _aacadts_bit_read64(v, &off, H_SAMPLE_FREQ_INDEX)) >= 13)
-		return -1;
-	off += H_PRIVATE_BIT;
-	if (0 == (h->chan_conf = _aacadts_bit_read64(v, &off, H_CHANNEL_CONFIG)))
-		return -1;
-	off += H_ORIGINAL;
-	off += H_HOME;
-	off += H_COPYRIGHT_ID;
-	off += H_COPYRIGHT_START;
-	h->framelen = _aacadts_bit_read64(v, &off, H_FRAME_LENGTH);
-	h->datalen = h->framelen - ((h->have_crc) ? 9 : 7);
-	if ((int)h->datalen < 0)
-		return -1;
-	return 0;
-}
-
-/** Compare 2 frame headers */
-static int aacadts_match(const void *a, const void *b)
-{
-	// SSSS SSSS SSSS MLLA PPFF FFBC CC
-	// 1111 1111 1111 1110 1111 1101 1100 0000
-	ffuint mask = ffint_be_cpu32(0xfffefdc0);
-	return (*(ffuint*)a & mask) == (*(ffuint*)b & mask);
-}
-
 /** Search for header
 Return offset
  <0 on error */
-static int aacadts_find(ffstr d, struct aacadts_hdr *h)
+static int aacadts_find(ffstr d, struct adts_hdr *h)
 {
 	for (ffsize i = 0;  i != d.len;  i++) {
 
@@ -165,14 +82,14 @@ static int aacadts_find(ffstr d, struct aacadts_hdr *h)
 
 		if (i + 7 > d.len)
 			break;
-		if (0 == aacadts_parse(h, &d.ptr[i]))
+		if (adts_hdr_read(h, &d.ptr[i], 7) > 0)
 			return i;
 	}
 	return -1;
 }
 
 /** Create MPEG-4 ASC data: "ASC  ASC_AAC" */
-static int aacadts_mp4asc(char *dst, const struct aacadts_hdr *h)
+static int aacadts_mp4asc(char *dst, const struct adts_hdr *h)
 {
 	/** MPEG-4 Audio Specific Config, a bit-array */
 	enum ASC {
@@ -189,9 +106,9 @@ static int aacadts_mp4asc(char *dst, const struct aacadts_hdr *h)
 	};
 
 	ffuint off = 0, v = 0;
-	v |= _aacadts_bit_write32(h->aot, &off, ASC_AOT);
-	v |= _aacadts_bit_write32(h->samp_freq_idx, &off, ASC_FREQ_IDX);
-	v |= _aacadts_bit_write32(h->chan_conf, &off, ASC_CHAN_CONF);
+	v |= adts_bit_write32(h->aot, &off, ASC_AOT);
+	v |= adts_bit_write32(h->samp_freq_idx, &off, ASC_FREQ_IDX);
+	v |= adts_bit_write32(h->chan_conf, &off, ASC_CHAN_CONF);
 	off += AAC_FRAME_LEN;
 	off += AAC_DEPENDSONCORECODER;
 	off += AAC_EXT;
@@ -206,7 +123,7 @@ static int _aacread_hdr_find(aacread *a, ffstr *input, ffstr *out)
 {
 	int r, pos;
 	ffstr chunk = {};
-	struct aacadts_hdr h;
+	struct adts_hdr h;
 
 	for (;;) {
 
@@ -238,7 +155,7 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 		R_GATHER,
 	};
 	int r;
-	struct aacadts_hdr h;
+	struct adts_hdr h;
 
 	for (;;) {
 		switch (a->state) {
@@ -262,8 +179,8 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 
 		case R_HDR2: {
 			const void *h2 = &a->chunk.ptr[a->frlen];
-			if (!(0 == aacadts_parse(&h, h2)
-				&& aacadts_match(a->chunk.ptr, h2))) {
+			if (!(adts_hdr_read(&h, h2, 7) > 0
+				&& adts_hdr_match(a->chunk.ptr, h2))) {
 				ffstream_consume(&a->stream, 1);
 				a->state = R_HDR_FIND;
 				continue;
@@ -271,17 +188,13 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 
 			a->state = R_HDR;
 
-			if (a->info.sample_rate == 0) {
+			unsigned hdr = (a->info.sample_rate == 0);
+			a->info.codec = h.aot;
+			a->info.channels = h.chan_conf;
+			a->info.sample_rate = h.sample_rate;
+
+			if (hdr) {
 				ffmem_copy(a->first_hdr, a->chunk.ptr, 7);
-				a->info.codec = h.aot;
-				a->info.channels = h.chan_conf;
-				static const ffushort samp_freq[] = {
-					96000/5, 88200/5, 64000/5, 48000/5,
-					44100/5, 32000/5, 24000/5, 22050/5,
-					16000/5, 12000/5, 11025/5, 8000/5,
-					7350/5,
-				};
-				a->info.sample_rate = samp_freq[h.samp_freq_idx] * 5;
 				r = aacadts_mp4asc(a->asc, &h);
 				ffstr_set(output, a->asc, r);
 				return AACREAD_HEADER;
@@ -291,8 +204,8 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 		}
 
 		case R_HDR:
-			if (!(0 == aacadts_parse(&h, a->chunk.ptr)
-				&& aacadts_match(a->first_hdr, a->chunk.ptr))) {
+			if (!(adts_hdr_read(&h, a->chunk.ptr, a->chunk.len) > 0
+				&& adts_hdr_match(a->first_hdr, a->chunk.ptr))) {
 				a->state = R_HDR_FIND;
 				return a->error = "lost synchronization",  AACREAD_WARN;
 			}

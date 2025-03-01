@@ -116,7 +116,7 @@ static int mkv_varint_shift(ffstr *data, ffuint64 *dst)
 	return r;
 }
 
-/** Get 1-ffbyte integer and shift input data */
+/** Get 1-byte integer and shift input data */
 static int mkv_byte_shift(ffstr *data, ffuint *dst)
 {
 	if (data->len == 0)
@@ -516,20 +516,21 @@ Segment (0x18538067)
   SimpleBlock (0xa3)
 */
 
-static const struct mkv_binel mkv_ctx_head[];
-static const struct mkv_binel mkv_ctx_segment[];
-static const struct mkv_binel mkv_ctx_info[];
-static const struct mkv_binel mkv_ctx_seek[];
-static const struct mkv_binel mkv_ctx_seekpt[];
-static const struct mkv_binel mkv_ctx_tracks[];
-static const struct mkv_binel mkv_ctx_trackentry[];
-static const struct mkv_binel mkv_ctx_trackentry_video[];
-static const struct mkv_binel mkv_ctx_trackentry_audio[];
-static const struct mkv_binel mkv_ctx_tags[];
-static const struct mkv_binel mkv_ctx_tag[];
-static const struct mkv_binel mkv_ctx_tag_simple[];
-static const struct mkv_binel mkv_ctx_cluster[];
-static const struct mkv_binel mkv_ctx_cluster_blkgrp[];
+static const struct mkv_binel
+	mkv_ctx_head[],
+	mkv_ctx_segment[],
+	mkv_ctx_info[],
+	mkv_ctx_seek[],
+	mkv_ctx_seekpt[],
+	mkv_ctx_tracks[],
+	mkv_ctx_trackentry[],
+	mkv_ctx_trackentry_video[],
+	mkv_ctx_trackentry_audio[],
+	mkv_ctx_tags[],
+	mkv_ctx_tag[],
+	mkv_ctx_tag_simple[],
+	mkv_ctx_cluster[],
+	mkv_ctx_cluster_blkgrp[];
 
 static const struct mkv_binel mkv_ctx_global[] = {
 	{ 0x1A45DFA3, MKV_F_REQ | MKV_PRIO(1), mkv_ctx_head },

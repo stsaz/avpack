@@ -197,14 +197,15 @@ RIFF "AVI "
   NNwb
 */
 
-static const struct avi_binchunk avi_ctx_riff[];
-static const struct avi_binchunk avi_ctx_avi[];
-static const struct avi_binchunk avi_ctx_avi_list[];
-static const struct avi_binchunk avi_ctx_hdrl[];
-static const struct avi_binchunk avi_ctx_hdrl_list[];
-static const struct avi_binchunk avi_ctx_strl[];
-static const struct avi_binchunk avi_ctx_info[];
-static const struct avi_binchunk avi_ctx_movi[];
+static const struct avi_binchunk
+	avi_ctx_riff[],
+	avi_ctx_avi[],
+	avi_ctx_avi_list[],
+	avi_ctx_hdrl[],
+	avi_ctx_hdrl_list[],
+	avi_ctx_strl[],
+	avi_ctx_info[],
+	avi_ctx_movi[];
 
 static const struct avi_binchunk avi_ctx_global[] = {
 	{ "RIFF", AVI_T_ANY | AVI_MINSIZE(4) | AVI_F_LIST | AVI_F_LAST, avi_ctx_riff },

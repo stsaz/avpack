@@ -19,7 +19,7 @@ fLaC INFO VORBIS_TAGS [PADDING] [PICTURE] [SEEKTABLE]
 
 #pragma once
 
-#include <avpack/flac-fmt.h>
+#include <avpack/base/flac.h>
 #include <avpack/vorbistag.h>
 #include <ffbase/vector.h>
 
@@ -252,6 +252,8 @@ static inline int flacwrite_process(flacwrite *f, ffstr *in, ffuint frame_sample
 
 		case W_SEEKTAB_WRITE:
 			r = flac_seektab_write(f->buf.ptr, f->buf.cap, f->sktab.ptr, f->sktab.len, f->info.minblock);
+			if (!r)
+				return _FLACW_ERR(f, "flac_seektab_write");
 			ffstr_set(out, f->buf.ptr, r);
 			return FLACWRITE_DONE;
 

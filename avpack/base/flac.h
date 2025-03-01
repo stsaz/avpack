@@ -21,8 +21,7 @@ flac_frame_find
 */
 
 #pragma once
-
-#include <ffbase/vector.h>
+#include <ffbase/string.h>
 
 
 enum FLAC_TYPE {
@@ -358,7 +357,8 @@ static inline ffuint flac_seektab_write(void *out, ffsize cap, const struct flac
 	ffuint n = 0,  len = npts * sizeof(struct flac_seekpoint);
 
 	FF_ASSERT(npts != 0);
-	FF_ASSERT(cap >= sizeof(struct flac_hdr) + len);
+	if (sizeof(struct flac_hdr) + len > cap)
+		return 0;
 
 	flac_hdr_write(out, FLAC_TSEEKTABLE, 1, len);
 
@@ -604,7 +604,7 @@ static int _flac_utf8_decode36(const char *utf8, ffsize len, ffuint64 *val)
 }
 
 /** Get checksum of flac frame header */
-static ffbyte flac_crc8(const void *data, unsigned int len)
+static ffbyte flac_crc8(const void *data, ffuint len)
 {
 	ffbyte crc = 0;
 

@@ -19,7 +19,7 @@ mp4read_offset
 
 #pragma once
 
-#include <avpack/mp4-fmt.h>
+#include <avpack/base/mp4.h>
 #include <ffbase/stream.h>
 #include <ffbase/vector.h>
 

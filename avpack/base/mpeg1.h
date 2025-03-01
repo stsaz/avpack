@@ -18,10 +18,8 @@ mpeg1_vbri_read
 */
 
 #pragma once
-
 #include <ffbase/string.h>
 #include <ffbase/stringz.h>
-#include <ffbase/vector.h>
 
 enum MPEG1_VER {
 	MPEG1_V1 = 3,

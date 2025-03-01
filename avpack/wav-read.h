@@ -16,7 +16,7 @@ wavread_tag
 
 #pragma once
 
-#include <avpack/wav-fmt.h>
+#include <avpack/base/wav.h>
 #include <ffbase/vector.h>
 
 struct wav_chunk {

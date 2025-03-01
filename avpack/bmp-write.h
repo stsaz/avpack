@@ -13,7 +13,7 @@ bmpwrite_size
 
 #pragma once
 
-#include <avpack/bmp-fmt.h>
+#include <avpack/base/bmp.h>
 #include <ffbase/vector.h>
 
 typedef struct bmpwrite_info {

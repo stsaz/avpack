@@ -19,7 +19,7 @@ cafread_tag
 
 #pragma once
 
-#include <avpack/caf-fmt.h>
+#include <avpack/base/caf.h>
 #include <ffbase/stream.h>
 #include <ffbase/vector.h>
 

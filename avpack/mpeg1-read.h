@@ -15,7 +15,7 @@ mpeg1read_cursample
 
 #pragma once
 
-#include <avpack/mpeg1-fmt.h>
+#include <avpack/base/mpeg1.h>
 #include <ffbase/string.h>
 #include <ffbase/stream.h>
 

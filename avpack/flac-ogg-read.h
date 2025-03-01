@@ -13,7 +13,7 @@ flacoggread_info
 OGG_PKT(HDR fLaC INFO) OGG_PKT(VORBIS_CMT) [OGG_PKT(HDR BLOCK)]... OGG_PKT(FRAME)...
 */
 
-#include <avpack/flac-fmt.h>
+#include <avpack/base/flac.h>
 #include <avpack/vorbistag.h>
 
 typedef struct flacoggread {

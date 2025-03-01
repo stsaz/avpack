@@ -14,7 +14,7 @@ wvread_tag
 */
 
 #pragma once
-#include <avpack/wv-fmt.h>
+#include <avpack/base/wv.h>
 #include <avpack/id3v1.h>
 #include <avpack/apetag.h>
 #include <avpack/shared.h>

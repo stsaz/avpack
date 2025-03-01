@@ -21,7 +21,7 @@ fLaC (HDR STREAMINFO) [HDR BLOCK]... (FRAME_HDR SUBFRAME... FRAME_FOOTER)...
 
 #pragma once
 
-#include <avpack/flac-fmt.h>
+#include <avpack/base/flac.h>
 #include <ffbase/stream.h>
 #include <ffbase/vector.h>
 

@@ -20,7 +20,7 @@ mp4write_offset
 
 #pragma once
 
-#include <avpack/mp4-fmt.h>
+#include <avpack/base/mp4.h>
 #include <ffbase/vector.h>
 
 struct mp4_tag {

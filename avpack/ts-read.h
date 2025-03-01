@@ -11,29 +11,10 @@ tsread_offset
 tsread_error
 */
 
-/* Format:
-PKT(PID:0 (PID#INFO))
-PKT(PID:#INFO (PID#DATA))
-PKT(PID:#DATA, START_FLAG, HDR(POS), DATA)
-PKT(PID:#DATA, DATA)...
-*/
-
 #pragma once
+#include <avpack/base/ts.h>
 #include <ffbase/stream.h>
 #include <ffbase/map.h>
-
-struct ts_packet {
-	ffuint pid, counter;
-	ffuint start;
-	ffuint64 pos_msec;
-	ffuint64 off;
-	ffstr body;
-};
-
-enum TS_STREAM {
-	TS_STREAM_AUDIO_MP3 = 3,
-	TS_STREAM_AUDIO_AAC = 15,
-};
 
 enum _TSR_PMT {
 	_TSR_PMT_TOP,
@@ -135,73 +116,6 @@ static inline const char* tsread_error(tsread *t)
 	return t->error;
 }
 
-static ffuint _tsr_read8(const ffbyte **d, const ffbyte *end)
-{
-	if (*d + 1 > end)
-		return ~0U;
-	ffuint r = **d;
-	*d += 1;
-	return r;
-}
-
-/* Format:
-sync			// 0x47
-flags_pid[2]	// [1], have_payload_start, [1], [13]
-flags_counter 	// [2], have_adaptation, have_payload, [4]
-adaptation_len
-adaptation_data[]
-payload_start
-payload[]
-*/
-static int _tsr_pkt_read(tsread *t, ffstr data, struct ts_packet *p)
-{
-	ffmem_zero_obj(p);
-	p->off = t->off - ffstream_used(&t->stream);
-
-	ffuint n;
-	const ffbyte *d = (ffbyte*)data.ptr, *end = (ffbyte*)data.ptr + data.len;
-	if (d[0] != 0x47)
-		goto bad;
-	p->start = !!(d[1] & 0x40);
-	p->pid = (ffint_be_cpu32_ptr(d) & 0x1fff00) >> 8;
-	unsigned have_adaptation = !!(d[3] & 0x20), have_payload = !!(d[3] & 0x10);
-	p->counter = d[3] & 0x0f;
-	d += 4;
-
-	unsigned ada_len = 0, ada_flags = 0;
-	if (have_adaptation) {
-		ada_len = d[0];
-		if (d + 1 + ada_len > end)
-			goto bad;
-		ada_flags = d[1];
-		d += 1 + ada_len;
-	}
-
-	if (p->start) {
-		if (~0U == (n = _tsr_read8(&d, end)))
-			goto bad;
-		if (n != 0) {
-			t->error = "case not supported";
-			return -1;
-		}
-	}
-	if (d > end)
-		goto bad;
-	if (have_payload)
-		ffstr_set(&p->body, d, end - d);
-
-	_tsr_log(t, "packet #%u: pid:%xu  counter:%u  adaptation:%u(%xu)  start:%u  payload:%u  offset:%xU"
-		, t->n_pkt++, p->pid, p->counter
-		, ada_len, ada_flags
-		, p->start, (int)p->body.len, p->off);
-
-	return 0;
-
-bad:
-	t->error = "bad header";
-	return -1;
-}
-
 /* Format:
 [8]
 sid[2]
@@ -260,7 +174,7 @@ static int _tsr_info_read(tsread *t, ffstr data)
 		return -1;
 	}
 
-	if (~0U == (pm->stream_type = _tsr_read8(&d, end)))
+	if (~0U == (pm->stream_type = ts_read8(&d, end)))
 		goto bad;
 
 	_tsr_log(t, " pid_data:%xu  stream_type:%xu"
@@ -323,7 +237,7 @@ Return enum TSREAD_R */
 static inline int tsread_process(tsread *t, ffstr *input, ffstr *output)
 {
 	int r;
-	ffstr chunk;
+	ffstr chunk = {};
 
 	for (;;) {
 		r = ffstream_gather(&t->stream, *input, t->gather, &chunk);
@@ -333,10 +247,20 @@ static inline int tsread_process(tsread *t, ffstr *input, ffstr *output)
 			return TSREAD_MORE;
 		chunk.len = t->gather;
 
-		r = _tsr_pkt_read(t, chunk, &t->pkt);
+		ffmem_zero_obj(&t->pkt);
+		r = ts_pkt_read(&t->pkt, chunk.ptr, chunk.len);
+		t->pkt.off = t->off - ffstream_used(&t->stream);
 		ffstream_consume(&t->stream, t->gather);
-		if (r)
+		if (r <= 0) {
+			t->error = "bad header";
 			return TSREAD_WARN;
+		}
+
+		const struct ts_packet *p = &t->pkt;
+		_tsr_log(t, "packet #%u: pid:%xu  counter:%u  adaptation:%u(%xu)  start:%u  payload:%u  offset:%xU"
+			, t->n_pkt++, p->pid, p->counter
+			, p->adaptation_len, p->adaptation_flags
+			, p->start, (int)p->body.len, p->off);
 
 		struct _tsr_pm *pm = ffmap_find_hash(&t->pms, t->pkt.pid, (void*)(ffsize)t->pkt.pid, 4, NULL);
 		if (!pm) {

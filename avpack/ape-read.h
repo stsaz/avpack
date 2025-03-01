@@ -15,21 +15,11 @@ aperead_block_samples
 aperead_align4
 */
 
-/* .ape format:
-"MAC " INFO SEEK_TABLE DATA... [APETAG] [ID3v1]
-*/
-
 #pragma once
-
+#include <avpack/base/ape.h>
 #include <avpack/id3v1.h>
 #include <avpack/apetag.h>
 #include <ffbase/vector.h>
-
-struct ape_info {
-	ffuint seekpoints;
-	ffuint block_samples;
-	ffuint lastframe_blocks;
-};
 
 typedef struct aperead {
 	ffuint state;
@@ -99,100 +89,6 @@ static inline void aperead_close(aperead *a)
 	ffmem_free(a->seektab);  a->seektab = NULL;
 }
 
-struct ape_desc {
-	char id[4]; // "MAC "
-	ffbyte ver[2]; // = x.xx * 1000.  >=3.98
-	ffbyte skip[2];
-
-	ffbyte desc_size[4];
-	ffbyte hdr_size[4];
-	ffbyte seektbl_size[4];
-	ffbyte wavhdr_size[4];
-	ffbyte unused[3 * 4];
-	ffbyte md5[16];
-};
-
-struct ape_hdr {
-	ffbyte comp_level[2];
-	ffbyte flags[2];
-
-	ffbyte frame_blocks[4];
-	ffbyte lastframe_blocks[4];
-	ffbyte total_frames[4];
-
-	ffbyte bps[2];
-	ffbyte channels[2];
-	ffbyte rate[4];
-};
-
-enum {
-	APE_HDR_MIN = sizeof(struct ape_desc) + sizeof(struct ape_hdr),
-};
-
-/**
-Return header length */
-static int _aper_hdr_read(aperead *a, ffstr d)
-{
-	if (ffmem_cmp(d.ptr, "MAC ", 4)) {
-		a->error = "bad header";
-		return -1;
-	}
-
-	ffuint ver = ffint_le_cpu16_ptr(&d.ptr[4]);
-	if (ver < 3980) {
-		a->error = "version not supported";
-		return -1;
-	}
-
-	const struct ape_desc *ds = (struct ape_desc*)d.ptr;
-	ffuint desc_size = ffint_le_cpu32_ptr(ds->desc_size);
-	ffuint hdr_size = ffint_le_cpu32_ptr(ds->hdr_size);
-	if (desc_size < sizeof(struct ape_desc)
-		|| hdr_size < sizeof(struct ape_hdr)
-		|| (ffuint64)desc_size + hdr_size > d.len)
-		return 0;
-
-	a->info.seekpoints = ffint_le_cpu32_ptr(ds->seektbl_size) / 4;
-
-	const struct ape_hdr *h = (struct ape_hdr*)&d.ptr[desc_size];
-	a->info.block_samples = ffint_le_cpu32_ptr(h->frame_blocks);
-	a->info.lastframe_blocks = ffint_le_cpu32_ptr(h->lastframe_blocks);
-
-	return desc_size + hdr_size;
-}
-
-/** Parse seek table (file offsets of ape blocks)
-Return 0 on success */
-static int _aper_seektab_read(aperead *a, ffstr data)
-{
-	ffuint n = data.len / 4;
-	ffuint *sp;
-	if (NULL == (sp = (ffuint*)ffmem_alloc((n+1) * 4)))
-		return _APER_ERR(a, "no memory");
-
-	ffuint off_prev = 0;
-	const ffuint *offsets = (ffuint*)data.ptr;
-	ffuint i;
-	for (i = 0;  i != n;  i++) {
-		ffuint off = ffint_le_cpu32(offsets[i]);
-		if (off_prev >= off)
-			break; // offsets must grow
-		sp[i] = off;
-		off_prev = off;
-	}
-
-	if (off_prev >= a->total_size)
-		goto err;
-	sp[i] = a->total_size;
-	a->seektab = sp;
-	a->info.seekpoints = i;
-	return 0;
-
-err:
-	ffmem_free(sp);
-	return _APER_ERR(a, "bad frames table");
-}
-
 /**
 Return enum APEREAD_R */
 static inline int aperead_process(aperead *a, ffstr *input, ffstr *output)
@@ -207,16 +103,19 @@ static inline int aperead_process(aperead *a, ffstr *input, ffstr *output)
 	for (;;) {
 		switch (a->state) {
 		case R_HDR:
-			r = _aper_hdr_read(a, a->chunk);
-			if (r < 0)
-				return APEREAD_ERROR;
+			r = ape_hdr_read(&a->info, a->chunk.ptr, a->chunk.len);
+			if (r <= 0)
+				return _APER_ERR(a, "bad header");
 			ffstr_set(output, a->chunk.ptr, r);
 			a->state = R_GATHER,  a->nextstate = R_SEEKTAB,  a->gather_size = a->info.seekpoints * 4;
 			return APEREAD_HEADER;
 
 		case R_SEEKTAB:
-			if (0 != (r = _aper_seektab_read(a, a->chunk)))
-				return r;
+			if (!(a->seektab = (ffuint*)ffmem_alloc((a->info.seekpoints + 1) * 4)))
+				return _APER_ERR(a, "no memory");
+			if (0 > (r = ape_seektab_read(a->seektab, a->chunk.ptr, a->chunk.len, a->total_size)))
+				return _APER_ERR(a, "bad frames table");
+			a->info.seekpoints = r;
 			a->state = R_BLOCK_GATHER;
 			if (NULL == ffvec_realloc(&a->buf, 4, 1))
 				return _APER_ERR(a, "no memory");
@@ -287,7 +186,7 @@ static inline int aperead_process(aperead *a, ffstr *input, ffstr *output)
 
 		case R_FTR_SEEK:
 			if (a->total_size == 0) {
-				a->state = R_GATHER,  a->nextstate = R_HDR,  a->gather_size = APE_HDR_MIN;
+				a->state = R_GATHER,  a->nextstate = R_HDR,  a->gather_size = ape_hdr_read(NULL, NULL, 0);
 				continue;
 			}
 
@@ -370,7 +269,7 @@ static inline int aperead_process(aperead *a, ffstr *input, ffstr *output)
 			// fallthrough
 
 		case R_HDR_SEEK:
-			a->state = R_GATHER,  a->nextstate = R_HDR,  a->gather_size = APE_HDR_MIN;
+			a->state = R_GATHER,  a->nextstate = R_HDR,  a->gather_size = ape_hdr_read(NULL, NULL, 0);
 			a->off = 0;
 			return APEREAD_SEEK;
 		}

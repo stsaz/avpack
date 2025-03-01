@@ -13,7 +13,7 @@ id3v2write_finish
 */
 
 #pragma once
-#include <avpack/id3v2-fmt.h>
+#include <avpack/base/id3v2.h>
 #include <avpack/id3v1.h>
 #include <avpack/mmtag.h>
 #include <ffbase/stream.h>

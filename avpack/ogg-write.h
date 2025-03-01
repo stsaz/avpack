@@ -10,7 +10,7 @@ oggwrite_process
 
 #pragma once
 
-#include <avpack/ogg-fmt.h>
+#include <avpack/base/ogg.h>
 #include <ffbase/vector.h>
 
 typedef struct oggwrite {

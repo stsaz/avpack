@@ -17,7 +17,7 @@ aviread_offset
 
 #pragma once
 
-#include <avpack/avi-fmt.h>
+#include <avpack/base/avi.h>
 #include <ffbase/vector.h>
 
 struct aviread_seekpt {
