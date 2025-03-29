@@ -7,16 +7,24 @@ ape_seektab_read
 */
 
 /* .ape format:
-"MAC " INFO SEEK_TABLE DATA... [APETAG] [ID3v1]
+"MAC " DESC HDR SEEK_TABLE DATA... [APETAG] [ID3v1]
 */
 
 #pragma once
 #include <ffbase/base.h>
 
 struct ape_info {
+	ffuint bits;
+	ffuint channels;
+	ffuint sample_rate;
+
+	ffuint version;
+	ffuint comp_level;
 	ffuint seekpoints;
 	ffuint block_samples;
 	ffuint lastframe_blocks;
+	ffuint64 total_samples;
+	ffbyte md5[16];
 };
 
 struct ape_desc {
@@ -32,9 +40,17 @@ struct ape_desc {
 	ffbyte md5[16];
 };
 
+enum APE_FLAGS {
+	APE_F8BIT = 1,
+	APE_FPEAK = 4,
+	APE_F24BIT = 8,
+	APE_FNSEEKEL = 0x10,
+	APE_FNOWAVHDR = 0x20,
+};
+
 struct ape_hdr {
-	ffbyte comp_level[2];
-	ffbyte flags[2];
+	ffbyte comp_level[2]; // 1000..5000
+	ffbyte flags[2]; // enum APE_FLAGS
 
 	ffbyte frame_blocks[4];
 	ffbyte lastframe_blocks[4];
@@ -58,8 +74,8 @@ static inline int ape_hdr_read(struct ape_info *ai, const char *data, ffsize len
 		return -1;
 
 	const struct ape_desc *ds = (struct ape_desc*)data;
-	ffuint ver = ffint_le_cpu16_ptr(ds->ver);
-	if (ver < 3980) 
+	ai->version = ffint_le_cpu16_ptr(ds->ver);
+	if (ai->version < 3980)
 		return -1; // version not supported
 
 	ffuint desc_size = ffint_le_cpu32_ptr(ds->desc_size);
@@ -71,10 +87,25 @@ static inline int ape_hdr_read(struct ape_info *ai, const char *data, ffsize len
 		return 0;
 
 	ai->seekpoints = ffint_le_cpu32_ptr(ds->seektbl_size) / 4;
+	memcpy(ai->md5, ds->md5, 16);
 
 	const struct ape_hdr *h = (struct ape_hdr*)(data + desc_size);
 	ai->block_samples = ffint_le_cpu32_ptr(h->frame_blocks);
 	ai->lastframe_blocks = ffint_le_cpu32_ptr(h->lastframe_blocks);
+	if (ai->lastframe_blocks > ai->block_samples)
+		return -1;
+	ai->comp_level = ffint_le_cpu16_ptr(h->comp_level);
+
+	ffuint total_frames = ffint_le_cpu32_ptr(h->total_frames);
+	if (total_frames)
+		ai->total_samples = (total_frames - 1) * ai->block_samples + ai->lastframe_blocks;
+
+	ffuint bps = ffint_le_cpu16_ptr(h->bps);
+	if (bps > 32)
+		return -1;
+	ai->bits = bps;
+	ai->channels = ffint_le_cpu16_ptr(h->channels);
+	ai->sample_rate = ffint_le_cpu32_ptr(h->rate);
 
 	return desc_size + hdr_size;
 }

@@ -1,6 +1,11 @@
 /** avpack: Opus format
 2024, Simon Zolin */
 
+/*
+opus_hdr_read opus_hdr_write
+opus_tags_read opus_tags_write
+*/
+
 #pragma once
 #include <ffbase/base.h>
 
@@ -23,6 +28,21 @@ static inline int opus_hdr_read(const char *d, size_t len, uint *channels, uint 
 		return 0;
 	*preskip = ffint_le_cpu16_ptr(h->preskip);
 	return sizeof(struct opus_hdr);
+}
+
+static inline int opus_hdr_write(void *buf, size_t cap, ffuint channels, ffuint orig_sample_rate, ffuint preskip)
+{
+	if (sizeof(struct opus_hdr) + 3 > cap)
+		return 0;
+
+	struct opus_hdr *h = (void*)buf;
+	ffmem_copy(h->id, "OpusHead", 8);
+	h->ver = 1;
+	h->channels = channels;
+	*(ffuint*)h->orig_sample_rate = ffint_le_cpu32(orig_sample_rate);
+	*(ffushort*)h->preskip = ffint_le_cpu16(preskip);
+	ffmem_zero(h + 1, 3);
+	return sizeof(struct opus_hdr) + 3;
 }
 
 static inline int opus_tags_read(const char *p, size_t len)
