@@ -2,7 +2,7 @@
 2021, Simon Zolin */
 
 /*
-adts_hdr_read
+adts_hdr_read adts_hdr_write
 adts_hdr_match
 */
 
@@ -32,6 +32,18 @@ static ffuint adts_bit_write32(ffuint val, ffuint *off, ffuint n)
 	*off += n;
 	return (val & ((1 << n) - 1)) << (32 - *off);
 }
+
+static ffuint64 adts_bit_write64(ffuint64 val, ffuint *off, ffuint n)
+{
+	*off += n;
+	return (val & ((1ULL << n) - 1)) << (64 - *off);
+}
+
+static const ffushort adts_sample_freq_d5[] = {
+	96000/5, 88200/5, 64000/5, 48000/5, 44100/5,
+	32000/5, 24000/5, 22050/5, 16000/5, 12000/5,
+	11025/5, 8000/5, 7350/5
+};
 
 /** Parse 7 bytes of ADTS frame header */
 static inline int adts_hdr_read(struct adts_hdr *h, const void *d, ffuint len)
@@ -82,12 +94,38 @@ static inline int adts_hdr_read(struct adts_hdr *h, const void *d, ffuint len)
 	if ((int)h->datalen < 0)
 		return -1;
 
-	static const ffushort samp_freq_d5[] = {
-		96000/5, 88200/5, 64000/5, 48000/5, 44100/5,
-		32000/5, 24000/5, 22050/5, 16000/5, 12000/5,
-		11025/5, 8000/5, 7350/5
-	};
-	h->sample_rate = (ffuint)samp_freq_d5[h->samp_freq_idx] * 5;
+	h->sample_rate = (ffuint)adts_sample_freq_d5[h->samp_freq_idx] * 5;
+	return 7;
+}
+
+static inline int adts_hdr_write(struct adts_hdr *h, void *d, ffsize cap, ffuint data_len)
+{
+	if (8 > cap)
+		return 0;
+
+	ffuint sfi = h->samp_freq_idx;
+	if (h->sample_rate != (ffuint)adts_sample_freq_d5[h->samp_freq_idx] * 5) {
+		for (sfi = 0;;  sfi++) {
+			if (sfi == FF_COUNT(adts_sample_freq_d5))
+				return 0; // sample rate not supported
+			if (h->sample_rate == (ffuint)adts_sample_freq_d5[sfi] * 5) {
+				h->samp_freq_idx = sfi;
+				break;
+			}
+		}
+	}
+
+	// SSSS SSSS SSSS MLLA PPFF FFBC CCOH ISLL LLLL LLLL LLLF FFFF FFFF FFBB
+	// 1111 1111 1111 0001 01?? ??00 1000 00?? ???? ???? ???1 1111 1111 1100
+	// f    f    f    1    4    0    8    0    0    0    1    f    f    c
+	ffuint64 v = 0xfff14080001ffc00;
+	ffuint off = 18;
+	v |= adts_bit_write64(sfi, &off, 4); // H_SAMPLE_FREQ_INDEX
+	off++;
+	v |= adts_bit_write64(h->chan_conf, &off, 3); // H_CHANNEL_CONFIG
+	off += 4;
+	v |= adts_bit_write64(data_len + 7, &off, 13); // H_FRAME_LENGTH
+	*(ffuint64*)d = ffint_be_cpu64(v);
 	return 7;
 }
 
