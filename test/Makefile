@@ -12,20 +12,22 @@ ifeq "$(OS)" "windows"
 endif
 
 OBJ := main.o \
+	\
 	bmp.o \
 	jpg.o \
 	png.o \
 	\
 	m3u.o \
 	pls.o \
+	cue.o \
 	\
 	apetag.o \
 	vorbistag.o \
 	\
-	cue.o \
 	icy.o \
 	compat.o \
-	reader.o
+	reader.o \
+	writer.o
 
 default: $(TESTER)
 

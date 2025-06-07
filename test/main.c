@@ -16,6 +16,7 @@ extern void test_pls();
 extern void test_png();
 extern void test_vorbistag();
 extern int test_reader(ffstr data, const char *ext);
+extern void test_writer();
 void test_gather();
 
 struct test {
@@ -34,6 +35,7 @@ static const struct test atests[] = {
 	T(pls),
 	T(png),
 	T(vorbistag),
+	T(writer),
 };
 #undef T
 

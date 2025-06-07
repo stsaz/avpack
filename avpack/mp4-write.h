@@ -12,14 +12,13 @@ mp4write_create_aac
 mp4write_close
 mp4write_addtag
 mp4write_process
-mp4write_size
 mp4write_error
 mp4write_finish
 mp4write_offset
 */
 
 #pragma once
-
+#include <avpack/decl.h>
 #include <avpack/base/mp4.h>
 #include <ffbase/vector.h>
 
@@ -70,6 +69,7 @@ typedef struct mp4write {
 
 	ffuint stream :1; //total length isn't known in advance
 	ffuint fin :1;
+	ffuint have_codec_conf :1;
 } mp4write;
 
 struct mp4_info {
@@ -122,15 +122,15 @@ static inline void _mp4write_log(const char *fmt, ...)
 }
 
 enum MP4WRITE_R {
-	MP4WRITE_DATA,
+	MP4WRITE_DATA = AVPK_DATA,
 
 	/* mp4write_offset() */
-	MP4WRITE_SEEK,
-	MP4WRITE_MORE,
-	MP4WRITE_DONE,
+	MP4WRITE_SEEK = AVPK_SEEK,
+	MP4WRITE_MORE = AVPK_MORE,
+	MP4WRITE_DONE = AVPK_FIN,
 
 	/* mp4write_error() */
-	MP4WRITE_ERROR,
+	MP4WRITE_ERROR = AVPK_ERROR,
 };
 
 /**
@@ -164,6 +164,19 @@ static inline int mp4write_create_aac(mp4write *m, struct mp4_info *info)
 	return 0;
 }
 
+static inline int mp4write_create2(mp4write *m, struct avpk_info *info)
+{
+	struct mp4_info i = {
+		.fmt.channels = info->channels,
+		.fmt.rate = info->sample_rate,
+		.total_samples = info->duration,
+		.enc_delay = info->delay,
+		.bitrate = info->real_bitrate,
+		.frame_samples = 1024,
+	};
+	return mp4write_create_aac(m, &i);
+}
+
 /**
 mmtag: enum MMTAG
 Return 0 on success */
@@ -194,6 +207,16 @@ static inline int mp4write_addtag(mp4write *m, ffuint mmtag, ffstr val)
 	if (NULL == ffstr_dupstr(&t->val, &val))
 		return -1;
 	return 0;
+}
+
+static inline int mp4write_tag_add(mp4write *m, unsigned id, ffstr name, ffstr val)
+{
+	(void)name;
+	if (id == 0)
+		return 1;
+	if (id == MMTAG_VENDOR)
+		return 0;
+	return mp4write_addtag(m, id, val);
 }
 
 static void tag_free(struct mp4_tag *t)
@@ -636,4 +659,35 @@ frame:
 	}
 }
 
+static inline int mp4write_process2(mp4write *m, struct avpk_frame *frame, unsigned flags, union avpk_write_result *res)
+{
+	if (!m->have_codec_conf) {
+		if (!frame->len)
+			return AVPK_MORE;
+		m->have_codec_conf = 1;
+		if (frame->len > sizeof(m->aconf))
+			return _MP4W_ERR(m, MP4WRITE_ELARGE);
+		ffmem_copy(m->aconf, frame->ptr, frame->len);
+		m->aconf_len = frame->len;
+		return AVPK_MORE;
+	}
+
+	if (flags & AVPKW_F_LAST)
+		m->fin = 1;
+
+	int r = mp4write_process(m, (ffstr*)frame, &res->packet);
+	switch (r) {
+	case AVPK_SEEK:
+		res->seek_offset = m->off;
+		break;
+
+	case AVPK_ERROR:
+		res->error.message = mp4write_error(m);
+		break;
+	}
+	return r;
+}
+
 #undef _MP4W_ERR
+
+AVPKW_IF_INIT(avpkw_mp4, "mp4\0m4a", AVPKF_MP4, mp4write, mp4write_create2, mp4write_close, mp4write_tag_add, mp4write_process2);

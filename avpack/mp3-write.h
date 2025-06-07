@@ -11,7 +11,7 @@ mp3write_offset
 */
 
 #pragma once
-
+#include <avpack/decl.h>
 #include <ffbase/vector.h>
 #include <avpack/id3v1.h>
 #include <avpack/id3v2.h>
@@ -49,6 +49,13 @@ static inline void mp3write_create(mp3write *m)
 	m->vbr_scale = -1;
 }
 
+static inline int mp3write_create2(mp3write *m, struct avpk_info *info)
+{
+	(void)info;
+	mp3write_create(m);
+	return 0;
+}
+
 static inline void mp3write_close(mp3write *m)
 {
 	struct _mp3write_tag *t;
@@ -74,17 +81,27 @@ static inline int mp3write_addtag(mp3write *m, ffuint mmtag, ffstr val)
 	return 0;
 }
 
+static inline int mp3write_tag_add(mp3write *m, unsigned id, ffstr name, ffstr val)
+{
+	(void)name;
+	if (id == 0)
+		return 1;
+	if (id == MMTAG_VENDOR)
+		return 0;
+	return mp3write_addtag(m, id, val);
+}
+
 enum MP3WRITE_R {
-	MP3WRITE_MORE,
-	MP3WRITE_DATA,
-	MP3WRITE_DONE,
-	MP3WRITE_SEEK,
-	MP3WRITE_ERROR,
+	MP3WRITE_MORE = AVPK_MORE,
+	MP3WRITE_DATA = AVPK_DATA,
+	MP3WRITE_DONE = AVPK_FIN,
+	MP3WRITE_SEEK = AVPK_SEEK,
+	MP3WRITE_ERROR = AVPK_ERROR,
 };
 
 enum MP3WRITE_F {
-	MP3WRITE_FLAST = 1, // this packet is the last one
-	MP3WRITE_FLAMEFRAME = 2, // this packet is LAME frame
+	MP3WRITE_FLAST = AVPKW_F_LAST,
+	MP3WRITE_FLAMEFRAME = AVPKW_F_MP3_LAME, // this packet is LAME frame
 };
 
 /**
@@ -236,9 +253,26 @@ static inline int mp3write_process(mp3write *m, ffstr *input, ffstr *output, int
 	}
 }
 
+static inline int mp3write_process2(mp3write *m, struct avpk_frame *frame, unsigned flags, union avpk_write_result *res)
+{
+	int r = mp3write_process(m, (ffstr*)frame, &res->packet, flags);
+	switch (r) {
+	case AVPK_SEEK:
+		res->seek_offset = m->data_off;
+		break;
+
+	case AVPK_ERROR:
+		res->error.message = "not enough memory";
+		break;
+	}
+	return r;
+}
+
 static inline ffuint64 mp3write_offset(mp3write *m)
 {
 	return m->data_off;
 }
 
 #define mp3write_frames(m)  (m)->nframes
+
+AVPKW_IF_INIT(avpkw_mp3, "mp3", AVPKF_MP3, mp3write, mp3write_create2, mp3write_close, mp3write_tag_add, mp3write_process2);

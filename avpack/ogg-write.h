@@ -9,7 +9,7 @@ oggwrite_process
 */
 
 #pragma once
-
+#include <avpack/decl.h>
 #include <avpack/base/ogg.h>
 #include <ffbase/vector.h>
 
@@ -40,10 +40,16 @@ Return 0 on success */
 static inline int oggwrite_create(oggwrite *o, ffuint serialno, ffuint max_page_samples)
 {
 	if (NULL == ffvec_alloc(&o->buf, OGG_MAXPAGE, 1))
-		return -1;
+		return 1;
 	o->page.serial = serialno;
 	o->max_page_samples = max_page_samples;
 	return 0;
+}
+
+static inline int oggwrite_create2(oggwrite *o, struct avpk_info *info)
+{
+	(void)info;
+	return oggwrite_create(o, 0, 0);
 }
 
 static inline void oggwrite_close(oggwrite *o)
@@ -52,14 +58,14 @@ static inline void oggwrite_close(oggwrite *o)
 }
 
 enum OGGWRITE_R {
-	OGGWRITE_MORE,
-	OGGWRITE_DATA,
-	OGGWRITE_DONE,
+	OGGWRITE_MORE = AVPK_MORE,
+	OGGWRITE_DATA = AVPK_DATA,
+	OGGWRITE_DONE = AVPK_FIN,
 };
 
 enum OGGWRITE_F {
-	OGGWRITE_FFLUSH = 1, // finalize page after this packet
-	OGGWRITE_FLAST = 2, // this packet is the last one
+	OGGWRITE_FFLUSH = AVPKW_F_OGG_FLUSH,
+	OGGWRITE_FLAST = AVPKW_F_LAST,
 };
 
 /** Add packet and return OGG page when ready.
@@ -147,3 +153,11 @@ flush:
 	o->page_startpos = o->page_endpos;  o->page_endpos = (ffuint64)-1;
 	return OGGWRITE_DATA;
 }
+
+static inline int oggwrite_process2(oggwrite *o, struct avpk_frame *frame, unsigned flags, union avpk_write_result *res)
+{
+	int r = oggwrite_process(o, (ffstr*)frame, &res->packet, frame->end_pos, flags);
+	return r;
+}
+
+AVPKW_IF_INIT(avpkw_ogg, "ogg", AVPKF_OGG, oggwrite, oggwrite_create2, oggwrite_close, NULL, oggwrite_process2);

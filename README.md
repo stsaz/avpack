@@ -131,19 +131,67 @@ fin:
 	avpk_close(&ar);
 ```
 
-### Writer interface
+### Audio File Format Writer
 
-Each format writer has a similar set of functions:
+```C
+	#include <avpack/writer.h>
 
-* `mp4write_create` - Open writer object
-* `mp4write_close` - Close writer object
-* `mp4write_process` - Process the input data (a/v frame) supplied by user and return result:
-	* `MP4WRITE_DATA` - User receives output data
-	* `MP4WRITE_MORE` - User may call the function again with a new chunk of input data - a/v frame
-	* `MP4WRITE_SEEK` - User must set the output file's position to the offset returned by `mp4write_offset()`
-	* `MP4WRITE_DONE` - Output data is finalized
-	* `MP4WRITE_ERROR` - An error is encountered during processing.  User may call `mp4write_error()` to get error message.
+	static const struct avpkw_if *const avpkw_formats[] = {
+		&avpkw_mp3,
+		...
+	};
 
+	avpk_writer aw = {};
+	struct avpk_writer_conf ac = {
+		.info = {
+			.duration = ...,
+			.sample_rate = ...,
+			.sample_bits = ...,
+			.channels = ...,
+		},
+	};
+	if (avpk_create(&aw, avpk_writer_find("mp3", avpkw_formats, FF_COUNT(avpkw_formats)), &ac))
+		exit(1);
+
+	avpk_tag(&aw, MMTAG_VENDOR, FFSTR_Z(""), ...);
+	avpk_tag(&aw, MMTAG_ARTIST, FFSTR_Z(""), ...);
+	avpk_tag(&aw, MMTAG_TITLE, FFSTR_Z(""), ...);
+	...
+
+	struct avpk_frame in = {
+		.len = ...,
+		.ptr = ...,
+	};
+	unsigned flags = 0;
+	for (;;) {
+		union avpk_write_result res = {};
+		int r = avpk_write(&aw, &in, flags, &res);
+		switch (r) {
+		case AVPK_DATA:
+			// use res.packet
+			break;
+
+		case AVPK_SEEK:
+			// seek to res.seek_offset
+			continue;
+
+		case AVPK_MORE:
+			in = ...;
+			flags = ...;
+			break;
+
+		case AVPK_FIN:
+			goto fin;
+
+		case AVPK_ERROR:
+			// read res.error.message
+			goto fin;
+		}
+	}
+
+fin:
+	avpk_writer_close(&aw);
+```
 
 ## Test
 

@@ -18,7 +18,7 @@ fLaC INFO VORBIS_TAGS [PADDING] [PICTURE] [SEEKTABLE]
 */
 
 #pragma once
-
+#include <avpack/decl.h>
 #include <avpack/base/flac.h>
 #include <avpack/vorbistag.h>
 #include <ffbase/vector.h>
@@ -59,6 +59,20 @@ static inline void flacwrite_create(flacwrite *f, const struct flac_info *info, 
 	f->outdev_seekable = 1;
 }
 
+static inline int flacwrite_create2(flacwrite *f, struct avpk_info *info)
+{
+	if (info->sample_float)
+		return 1;
+
+	struct flac_info i = {
+		.bits = info->sample_bits,
+		.channels = info->channels,
+		.sample_rate = info->sample_rate,
+	};
+	flacwrite_create(f, &i, info->duration);
+	return 0;
+}
+
 static inline void flacwrite_close(flacwrite *f)
 {
 	vorbistagwrite_destroy(&f->vtag);
@@ -84,6 +98,13 @@ static inline int flacwrite_addtag(flacwrite *f, ffuint mmtag, ffstr val)
 	if (0 != vorbistagwrite_add(&f->vtag, mmtag, val))
 		return -1;
 	return 0;
+}
+
+static inline int flacwrite_tag_add(flacwrite *f, unsigned id, ffstr name, ffstr val)
+{
+	if (id)
+		return flacwrite_addtag(f, id, val);
+	return flacwrite_addtag_name(f, name, val);
 }
 
 /** Set picture
@@ -139,15 +160,15 @@ static int _flacw_hdr(flacwrite *f)
 
 enum FLACWRITE_R {
 	/** Awaiting next FLAC frame to write */
-	FLACWRITE_MORE,
+	FLACWRITE_MORE = AVPK_MORE,
 
 	/** Output data chunk is ready */
-	FLACWRITE_DATA,
+	FLACWRITE_DATA = AVPK_DATA,
 
 	/** Next output data chunk must be written at offset flacwrite_offset() */
-	FLACWRITE_SEEK,
-	FLACWRITE_DONE,
-	FLACWRITE_ERROR,
+	FLACWRITE_SEEK = AVPK_SEEK,
+	FLACWRITE_DONE = AVPK_FIN,
+	FLACWRITE_ERROR = AVPK_ERROR,
 };
 
 /* .flac write algorithm:
@@ -277,3 +298,30 @@ static inline ffuint64 flacwrite_offset(flacwrite *f)
 {
 	return f->off;
 }
+
+static inline int flacwrite_process2(flacwrite *f, struct avpk_frame *frame, unsigned flags, union avpk_write_result *res)
+{
+	if (flags & AVPKW_F_LAST) {
+		if (!(flags & AVPKW_F_FLAC_INFO)
+			|| frame->len != sizeof(struct flac_info)) {
+			res->error.message = "incorrect API usage";
+			return AVPK_ERROR;
+		}
+		ffmem_copy(&f->info, frame->ptr, frame->len);
+		f->fin = 1;
+	}
+
+	int r = flacwrite_process(f, (ffstr*)frame, frame->duration, &res->packet);
+	switch (r) {
+	case AVPK_SEEK:
+		res->seek_offset = f->off;
+		break;
+
+	case AVPK_ERROR:
+		res->error.message = flacwrite_error(f);
+		break;
+	}
+	return r;
+}
+
+AVPKW_IF_INIT(avpkw_flac, "flac", AVPKF_FLAC, flacwrite, flacwrite_create2, flacwrite_close, flacwrite_tag_add, flacwrite_process2);

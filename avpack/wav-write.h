@@ -13,7 +13,7 @@ wavwrite_finish
 */
 
 #pragma once
-
+#include <avpack/decl.h>
 #include <avpack/base/wav.h>
 #include <ffbase/vector.h>
 
@@ -39,6 +39,21 @@ static inline int wavwrite_create(wavwrite *w, struct wav_info *info)
 	return 0;
 }
 
+static inline int wavwrite_create2(wavwrite *w, struct avpk_info *info)
+{
+	w->info.channels = info->channels;
+	w->info.sample_rate = info->sample_rate;
+	w->info.total_samples = info->duration;
+
+	if (info->sample_float && info->sample_bits == 32)
+		w->info.format = WAV_FLOAT;
+	else if (!info->sample_float)
+		w->info.format = info->sample_bits;
+	if (!w->info.format)
+		return 1;
+	return 0;
+}
+
 static inline void wavwrite_close(wavwrite *w)
 {
 	ffvec_free(&w->buf);
@@ -53,12 +68,11 @@ static inline const char* wavwrite_error(wavwrite *w)
 	(w)->errmsg = (e), WAVWRITE_ERROR
 
 enum WAVWRITE_R {
-	WAVWRITE_DATA,
-	WAVWRITE_HEADER,
-	WAVWRITE_DONE,
-	WAVWRITE_MORE,
-	WAVWRITE_SEEK,
-	WAVWRITE_ERROR,
+	WAVWRITE_DATA = AVPK_DATA,
+	WAVWRITE_DONE = AVPK_FIN,
+	WAVWRITE_MORE = AVPK_MORE,
+	WAVWRITE_SEEK = AVPK_SEEK,
+	WAVWRITE_ERROR = AVPK_ERROR,
 };
 
 /**
@@ -104,12 +118,12 @@ static inline int wavwrite_process(wavwrite *w, ffstr *input, ffstr *output)
 
 		if (w->state == W_HDRFIN) {
 			w->state = W_DONE;
-			return WAVWRITE_HEADER;
+			return WAVWRITE_DATA;
 		}
 
 		w->dsize = 0;
 		w->state = W_DATA;
-		return WAVWRITE_HEADER;
+		return WAVWRITE_DATA;
 	}
 
 	case W_DONE:
@@ -141,16 +155,27 @@ static inline int wavwrite_process(wavwrite *w, ffstr *input, ffstr *output)
 	return WAVWRITE_ERROR;
 }
 
-#undef _WAVW_ERR
-
-/** Get output file size.
-Call it only after WAVWRITE_HEADER is returned. */
-static inline ffuint64 wavwrite_size(wavwrite *w)
+static inline int wavwrite_process2(wavwrite *w, struct avpk_frame *frame, unsigned flags, union avpk_write_result *res)
 {
-	if (w->info.total_samples == 0)
-		return 0;
-	return w->doff + w->info.total_samples * w->sampsize;
+	if (flags & AVPKW_F_LAST)
+		w->fin = 1;
+
+	int r = wavwrite_process(w, (ffstr*)frame, &res->packet);
+	switch (r) {
+	case AVPK_SEEK:
+		res->seek_offset = w->off;
+		break;
+
+	case AVPK_ERROR:
+		res->error.message = w->errmsg;
+		break;
+	}
+	return r;
 }
+
+#undef _WAVW_ERR
 
 #define wavwrite_offset(w)  ((w)->off)
 #define wavwrite_finish(w)  ((w)->fin = 1)
+
+AVPKW_IF_INIT(avpkw_wav, "wav", AVPKF_WAV, wavwrite, wavwrite_create2, wavwrite_close, NULL, wavwrite_process2);

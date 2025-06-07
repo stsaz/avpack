@@ -126,6 +126,45 @@ struct avpkr_if {
 		sizeof(T), \
 		(void (*)(void *, struct avpk_reader_conf *))op, \
 		(int (*)(void *, ffstr *, union avpk_read_result *))pr, \
-		(void (*)(void *, ffuint64 ))sk, \
+		(void (*)(void *, ffuint64))sk, \
 		(void (*)(void *))cl, \
 	}
+
+
+union avpk_write_result {
+	ffstr packet;
+
+	ffuint64 seek_offset;
+
+	struct {
+		const char *message;
+	} error;
+};
+
+struct avpkw_if {
+	char ext[8]; // ext1 \0 ext2 \0
+	unsigned char format;
+	unsigned short context_size;
+	int (*create)(void *ctx, struct avpk_info *info);
+	void (*close)(void *ctx);
+	int (*tag_add)(void *ctx, unsigned id, ffstr name, ffstr val);
+	int (*process)(void *ctx, struct avpk_frame *frame, unsigned flags, union avpk_write_result *res);
+};
+
+#define AVPKW_IF_INIT(name, ext, fmt, T, cr, cl, tg, pr) \
+	static const struct avpkw_if name = { \
+		ext, \
+		fmt, \
+		sizeof(T), \
+		(int (*)(void *, struct avpk_info *))cr, \
+		(void (*)(void *))cl, \
+		(int (*)(void *, unsigned, ffstr, ffstr ))tg, \
+		(int (*)(void *, struct avpk_frame *, unsigned, union avpk_write_result *))pr, \
+	}
+
+enum AVPKW_FLAGS {
+	AVPKW_F_LAST = 1, // this packet is the last one
+	AVPKW_F_OGG_FLUSH = 2, // finalize OGG page after this packet
+	AVPKW_F_FLAC_INFO = 2, // user is passing the final 'struct flac_info' data from encoder
+	AVPKW_F_MP3_LAME = 2, // user is passing LAME frame from encoder
+};
