@@ -29,25 +29,6 @@ enum MKV_E {
 	MKV_EMEM,
 };
 
-/** Codec ID */
-enum MKV_CODEC {
-	MKV_A_AAC = 1,
-	MKV_A_AC3,
-	MKV_A_ALAC,
-	MKV_A_FLAC,
-	MKV_A_MPEGL3,
-	MKV_A_OPUS,
-	MKV_A_PCM,
-	MKV_A_VORBIS,
-
-	MKV_S_ASS,
-	MKV_S_UTF8,
-
-	MKV_V_AVC,
-	MKV_V_HEVC,
-};
-
-// MKV_CODEC_ID:
 static const char* const mkv_codecstr[] = {
 	"A_AAC",
 	"A_AC3",
@@ -64,6 +45,22 @@ static const char* const mkv_codecstr[] = {
 	"V_MPEG4/ISO/AVC",
 	"V_MPEGH/ISO/HEVC",
 };
+static const unsigned char mkv_codec_int[] = {
+	AVPKC_AAC,
+	AVPKC_AC3,
+	AVPKC_ALAC,
+	AVPKC_FLAC,
+	AVPKC_MP3,
+	AVPKC_OPUS,
+	AVPKC_PCM,
+	AVPKC_VORBIS,
+
+	AVPKC_ASS,
+	AVPKC_UTF8,
+
+	AVPKC_AVC,
+	AVPKC_HEVC,
+};
 
 /** Translate codec name to ID */
 static int mkv_codec(ffstr name)
@@ -71,7 +68,7 @@ static int mkv_codec(ffstr name)
 	int r = ffszarr_findsorted(mkv_codecstr, FF_COUNT(mkv_codecstr), name.ptr, name.len);
 	if (r < 0)
 		return -1;
-	return r + 1;
+	return mkv_codec_int[r];
 }
 
 /** Parse variable width integer.
@@ -274,7 +271,7 @@ ffbyte Xiph[] | ffbyte EBML[]
 */
 static int mkv_lacing(ffstr *data, ffvec *lacing, ffuint type)
 {
-	int r;
+	int r = MKV_ELACING;
 	ffuint nframes;
 	if (0 > mkv_byte_shift(data, &nframes))
 		return MKV_EINTVAL;

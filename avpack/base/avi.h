@@ -98,23 +98,27 @@ static int avi_strh_read(struct avi_audio_info *ai, const char *data)
 static int avi_strf_read(struct avi_audio_info *ai, const char *data, ffsize len)
 {
 	const struct avi_strf_audio *f = (struct avi_strf_audio*)data;
-	ai->codec = ffint_le_cpu16_ptr(f->format);
+	unsigned codec = ffint_le_cpu16_ptr(f->format);
 	ai->bits = ffint_le_cpu16_ptr(f->bit_depth);
 	ai->channels = ffint_le_cpu16_ptr(f->channels);
 	ai->sample_rate = ffint_le_cpu32_ptr(f->sample_rate);
 	ai->bitrate = ffint_le_cpu32_ptr(f->byte_rate) * 8;
 
-	if (sizeof(struct avi_strf_audio)+2 > len)
-		return 0;
-
-	ffuint exsize = ffint_le_cpu16_ptr(f->exsize);
+	unsigned exsize = 0;
+	if (sizeof(struct avi_strf_audio)+2 <= len)
+		exsize = ffint_le_cpu16_ptr(f->exsize);
 	if (exsize > len)
 		return -1;
 	data += sizeof(struct avi_strf_audio) + 2;
 
-	switch (ai->codec) {
+	switch (codec) {
+
+	case AVI_A_PCM:
+		ai->codec = AVPKC_PCM;
+		break;
 
 	case AVI_A_MP3: {
+		ai->codec = AVPKC_MP3;
 		if (exsize < sizeof(struct avi_strf_mp3))
 			break;
 
@@ -125,6 +129,7 @@ static int avi_strf_read(struct avi_audio_info *ai, const char *data, ffsize len
 	}
 
 	case AVI_A_AAC:
+		ai->codec = AVPKC_AAC;
 		ffstr_set(&ai->codec_conf, data, exsize);
 		break;
 	}

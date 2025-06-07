@@ -14,7 +14,7 @@ oggread_error
 */
 
 #pragma once
-
+#include <avpack/decl.h>
 #include <avpack/base/ogg.h>
 #include <ffbase/stream.h>
 #include <ffbase/vector.h>
@@ -82,6 +82,13 @@ static inline void oggread_open(oggread *o, ffuint64 total_size)
 	o->total_size = (total_size == 0) ? (ffuint64)-1 : total_size;
 	o->seek_sample = (ffuint64)-1;
 	ffstream_realloc(&o->stream, 4096);
+}
+
+static inline void oggread_open2(oggread *o, struct avpk_reader_conf *conf)
+{
+	oggread_open(o, conf->total_size);
+	o->log = conf->log;
+	o->udata = conf->opaque;
 }
 
 static inline void _oggread_log(oggread *o, const char *fmt, ...)
@@ -163,15 +170,15 @@ static int _oggread_page(oggread *o, ffstr page)
 }
 
 enum OGGREAD_R {
-	OGGREAD_MORE,
-	OGGREAD_HEADER, // packet from page with pos=0
-	OGGREAD_DATA, // data packet
+	OGGREAD_MORE = AVPK_MORE,
+	OGGREAD_HEADER = AVPK_HEADER, // packet from page with pos=0
+	OGGREAD_DATA = AVPK_DATA, // data packet
 
 	/** Need input data at absolute file offset = oggread_offset()
 	Expecting oggread_process() with more data at the specified offset */
-	OGGREAD_SEEK,
-	OGGREAD_DONE,
-	OGGREAD_ERROR,
+	OGGREAD_SEEK = AVPK_SEEK,
+	OGGREAD_DONE = AVPK_FIN,
+	OGGREAD_ERROR = AVPK_ERROR,
 };
 
 /** Get file offset by audio position */
@@ -222,8 +229,10 @@ static int _oggread_seek_hdr(oggread *o, ffstr *input)
 	}
 
 	if (r == 0) {
-		if (o->eof)
+		if (o->eof) {
+			o->eof = 0;
 			return _oggread_seek_adjust_edge(o, o->seekpt);
+		}
 		return OGGREAD_MORE;
 	}
 
@@ -350,6 +359,10 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 	};
 	int r;
 	const struct ogg_hdr *h;
+
+	ffstr empty = {};
+	if ((o->eof = !input))
+		input = &empty;
 
 	for (;;) {
 		switch (o->state) {
@@ -543,4 +556,25 @@ static inline void oggread_seek(oggread *o, ffuint64 sample)
 /** Get an absolute file offset to seek */
 #define oggread_offset(o)  ((o)->off)
 
-#define oggread_eof(o, val)  ((o)->eof = val)
+static inline int oggread_process2(oggread *o, ffstr *input, union avpk_read_result *res)
+{
+	int r = oggread_process(o, input, (ffstr*)&res->frame);
+	switch (r) {
+	case AVPK_DATA:
+		res->frame.pos = ~0ULL;
+		if (oggread_pkt_num(o) == 1 && o->page_endpos != ~0ULL)
+			res->frame.pos = o->page_startpos;
+
+		res->frame.end_pos = ~0ULL;
+		if (oggread_pkt_last(o))
+			res->frame.end_pos = o->page_endpos;
+
+		res->frame.duration = ~0U;
+		break;
+
+	case AVPK_SEEK:
+		res->seek_offset = o->off;
+		break;
+	}
+	return r;
+}

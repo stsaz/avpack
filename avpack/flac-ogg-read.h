@@ -13,6 +13,7 @@ flacoggread_info
 OGG_PKT(HDR fLaC INFO) OGG_PKT(VORBIS_CMT) [OGG_PKT(HDR BLOCK)]... OGG_PKT(FRAME)...
 */
 
+#include <avpack/decl.h>
 #include <avpack/base/flac.h>
 #include <avpack/vorbistag.h>
 
@@ -45,12 +46,12 @@ static inline void flacoggread_close(flacoggread *f)
 }
 
 enum FLACOGGREAD_R {
-	FLACOGGREAD_MORE,
-	FLACOGGREAD_HEADER,
-	FLACOGGREAD_TAG,
-	FLACOGGREAD_HEADER_FIN,
-	FLACOGGREAD_DATA,
-	FLACOGGREAD_ERROR,
+	FLACOGGREAD_MORE = AVPK_MORE,
+	FLACOGGREAD_HEADER = AVPK_HEADER,
+	FLACOGGREAD_TAG = AVPK_META,
+	FLACOGGREAD_DATA = AVPK_DATA,
+	FLACOGGREAD_ERROR = AVPK_ERROR,
+	FLACOGGREAD_HEADER_FIN = 100,
 };
 
 struct flacogg_hdr {

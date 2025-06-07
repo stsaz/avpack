@@ -15,6 +15,7 @@ mpcread_cursample
 */
 
 #pragma once
+#include <avpack/decl.h>
 #include <avpack/base/mpc.h>
 #include <avpack/apetag.h>
 #include <ffbase/vector.h>
@@ -30,7 +31,7 @@ typedef struct mpcread {
 	ffuint state;
 	const char *error;
 	ffuint nextstate;
-	ffuint gather_size;
+	ffuint gather_size, hdr_ready;
 	ffvec buf;
 	ffstr chunk;
 	struct mpcread_info info;
@@ -63,23 +64,23 @@ typedef struct mpcread {
 
 enum MPCREAD_R {
 	/** Use mpcread_info() to get header info.  Output contains SH block data. */
-	MPCREAD_HEADER = 1,
+	MPCREAD_HEADER = AVPK_HEADER,
 
 	/** New tag is read: use mpcread_tag() */
-	MPCREAD_TAG,
+	MPCREAD_TAG = AVPK_META,
 
 	/** Need more input data */
-	MPCREAD_MORE,
+	MPCREAD_MORE = AVPK_MORE,
 
 	/** Output contains AP block data */
-	MPCREAD_DATA,
+	MPCREAD_DATA = AVPK_DATA,
 
 	/** Need more input data at offset mpcread_offset() */
-	MPCREAD_SEEK,
+	MPCREAD_SEEK = AVPK_SEEK,
 
-	MPCREAD_DONE,
-	MPCREAD_ERROR,
-	MPCREAD_WARN,
+	MPCREAD_DONE = AVPK_FIN,
+	MPCREAD_ERROR = AVPK_ERROR,
+	MPCREAD_WARN = AVPK_WARNING,
 };
 
 #define _MPCR_ERR(m, msg) \
@@ -100,6 +101,13 @@ static inline void mpcread_open(mpcread *m, ffuint64 total_size)
 	ffvec_alloc(&m->buf, 4096, 1);
 	m->total_size = total_size;
 	m->seek_sample = (ffuint64)-1;
+}
+
+static inline void mpcread_open2(mpcread *m, struct avpk_reader_conf *conf)
+{
+	mpcread_open(m, conf->total_size);
+	m->log = conf->log;
+	m->udata = conf->opaque;
 }
 
 static inline void mpcread_close(mpcread *m)
@@ -502,6 +510,53 @@ static inline int mpcread_process(mpcread *m, ffstr *input, ffstr *output)
 	}
 }
 
+static inline int mpcread_process2(mpcread *m, ffstr *input, union avpk_read_result *res)
+{
+	if (m->hdr_ready) {
+		m->hdr_ready = 0;
+		ffstr_set(&res->frame, m->sh_block, m->sh_block_len);
+		res->frame.pos = ~0ULL;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = ~0U;
+		return AVPK_DATA;
+	}
+
+	int r = mpcread_process(m, input, (ffstr*)&res->frame);
+	switch (r) {
+	case AVPK_HEADER:
+		m->hdr_ready = 1;
+		ffmem_zero_obj(&res->frame);
+		res->hdr.codec = AVPKC_MPC;
+		res->hdr.sample_rate = m->info.sample_rate;
+		res->hdr.channels = m->info.channels;
+		res->hdr.duration = m->info.total_samples;
+		break;
+
+	case AVPK_META:
+		res->tag.id = m->tag;
+		res->tag.name = m->tagname;
+		res->tag.value = m->tagval;
+		break;
+
+	case AVPK_DATA:
+		res->frame.pos = m->blk_apos - m->info.frame_samples;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = m->info.frame_samples;
+		break;
+
+	case AVPK_SEEK:
+		res->seek_offset = m->off;
+		break;
+
+	case AVPK_ERROR:
+	case AVPK_WARNING:
+		res->error.message = m->error;
+		res->error.offset = m->off;
+		break;
+	}
+	return r;
+}
+
 static inline const struct mpcread_info* mpcread_info(mpcread *m)
 {
 	return &m->info;
@@ -527,3 +582,5 @@ static inline int mpcread_tag(mpcread *m, ffstr *name, ffstr *val)
 
 #undef _MPCR_ERR
 #undef _MPCR_WARN
+
+AVPKR_IF_INIT(avpk_mpc, "mpc", AVPKF_MPC, mpcread, mpcread_open2, mpcread_process2, mpcread_seek, mpcread_close);

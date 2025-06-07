@@ -7,7 +7,7 @@ caf_hdr_read
 caf_pakt_read
 caf_desc_read
 caf_varint
-mp4_esds_read
+caf_mp4_esds_read
 kuki_alac_read
 */
 
@@ -19,13 +19,6 @@ HDR ADESC [COOKIE] [TAGS] PACKET_INFO ADATA(EDIT_COUNT PACKETS...)
 
 #include <ffbase/stringz.h>
 
-enum CAF_CODEC {
-	CAF_UKN,
-	CAF_AAC,
-	CAF_ALAC,
-	CAF_LPCM,
-};
-
 enum CAF_FORMAT {
 	// bits = 0x??
 	CAF_FMT_LE = 0x0100,
@@ -33,7 +26,7 @@ enum CAF_FORMAT {
 };
 
 typedef struct caf_info {
-	ffuint codec; // enum CAF_CODEC
+	ffuint codec;
 	ffuint sample_rate;
 	ffuint channels;
 	ffuint format; // enum CAF_FORMAT
@@ -117,9 +110,14 @@ static inline int caf_desc_read(caf_info *info, const void *data)
 		"alac",
 		"lpcm",
 	};
+	static const unsigned char fmts_int[] = {
+		AVPKC_AAC,
+		AVPKC_ALAC,
+		AVPKC_PCM,
+	};
 	int r = ffcharr_findsorted(fmts, FF_COUNT(fmts), sizeof(fmts[0]), d->fmt, 4);
 	if (r != -1)
-		info->codec = r + 1;
+		info->codec = fmts_int[r];
 	return 0;
 }
 
@@ -156,8 +154,8 @@ static inline int caf_varint(const void *data, ffsize len, ffuint *dst)
 }
 
 
-struct mp4_acodec {
-	ffuint type; //enum MP4_ESDS_DEC_TYPE
+struct caf_mp4_acodec {
+	ffuint type; //enum CAF_MP4_ESDS_DEC_TYPE
 	ffuint stm_type;
 	ffuint max_brate;
 	ffuint avg_brate;
@@ -173,39 +171,39 @@ struct mp4_acodec {
 	(TAG SIZE SL)
 } */
 
-enum MP4_ESDS_TAGS {
-	MP4_ESDS_TAG = 3,
-	MP4_ESDS_DEC_TAG = 4,
-	MP4_ESDS_DECSPEC_TAG = 5,
-	MP4_ESDS_SL_TAG = 6,
+enum CAF_MP4_ESDS_TAGS {
+	CAF_MP4_ESDS_TAG = 3,
+	CAF_MP4_ESDS_DEC_TAG = 4,
+	CAF_MP4_ESDS_DECSPEC_TAG = 5,
+	CAF_MP4_ESDS_SL_TAG = 6,
 };
-struct mp4_esds_tag {
-	ffbyte tag; //enum MP4_ESDS_TAGS
+struct caf_mp4_esds_tag {
+	ffbyte tag; //enum CAF_MP4_ESDS_TAGS
 	ffbyte size[4]; //"NN" | "80 80 80 NN"
 };
-struct mp4_esds {
+struct caf_mp4_esds {
 	ffbyte unused[3];
 };
-struct mp4_esds_dec {
-	ffbyte type; //enum MP4_ESDS_DEC_TYPE
+struct caf_mp4_esds_dec {
+	ffbyte type; //enum CAF_MP4_ESDS_DEC_TYPE
 	ffbyte stm_type;
 	ffbyte unused[3];
 	ffbyte max_brate[4];
 	ffbyte avg_brate[4];
 };
-struct mp4_esds_decspec {
+struct caf_mp4_esds_decspec {
 	ffbyte data[2]; //Audio Specific Config
 };
-struct mp4_esds_sl {
+struct caf_mp4_esds_sl {
 	ffbyte val;
 };
 
 /** Get next esds block.
 @size: input: minimum block size;  output: actual block size
 Return block tag;  0 on error. */
-static int mp4_esds_block(const char **pd, const char *end, ffuint *size)
+static int caf_mp4_esds_block(const char **pd, const char *end, ffuint *size)
 {
-	const struct mp4_esds_tag *tag = (struct mp4_esds_tag*)*pd;
+	const struct caf_mp4_esds_tag *tag = (struct caf_mp4_esds_tag*)*pd;
 	ffuint sz;
 
 	if (*pd + 2 > end)
@@ -216,7 +214,7 @@ static int mp4_esds_block(const char **pd, const char *end, ffuint *size)
 		sz = tag->size[0];
 
 	} else {
-		*pd += sizeof(struct mp4_esds_tag);
+		*pd += sizeof(struct caf_mp4_esds_tag);
 		if (*pd > end)
 			return 0;
 		sz = tag->size[3];
@@ -231,29 +229,29 @@ static int mp4_esds_block(const char **pd, const char *end, ffuint *size)
 /**
 Return 0 on success;
  <0 on error */
-static inline int mp4_esds_read(const char *data, ffuint len, struct mp4_acodec *ac)
+static inline int caf_mp4_esds_read(const char *data, ffuint len, struct caf_mp4_acodec *ac)
 {
 	const char *d = data;
 	const char *end = data + len;
 	int r = -1;
 	ffuint size;
 
-	size = sizeof(struct mp4_esds);
-	if (MP4_ESDS_TAG == mp4_esds_block(&d, end, &size)) {
-		d += sizeof(struct mp4_esds);
+	size = sizeof(struct caf_mp4_esds);
+	if (CAF_MP4_ESDS_TAG == caf_mp4_esds_block(&d, end, &size)) {
+		d += sizeof(struct caf_mp4_esds);
 
-		size = sizeof(struct mp4_esds_dec);
-		if (MP4_ESDS_DEC_TAG == mp4_esds_block(&d, end, &size)) {
-			const struct mp4_esds_dec *dec = (struct mp4_esds_dec*)d;
-			d += sizeof(struct mp4_esds_dec);
+		size = sizeof(struct caf_mp4_esds_dec);
+		if (CAF_MP4_ESDS_DEC_TAG == caf_mp4_esds_block(&d, end, &size)) {
+			const struct caf_mp4_esds_dec *dec = (struct caf_mp4_esds_dec*)d;
+			d += sizeof(struct caf_mp4_esds_dec);
 			ac->type = dec->type;
 			ac->stm_type = dec->stm_type;
 			ac->max_brate = ffint_be_cpu32_ptr(dec->max_brate);
 			ac->avg_brate = ffint_be_cpu32_ptr(dec->avg_brate);
 
-			size = sizeof(struct mp4_esds_decspec);
-			if (MP4_ESDS_DECSPEC_TAG == mp4_esds_block(&d, end, &size)) {
-				const struct mp4_esds_decspec *spec = (struct mp4_esds_decspec*)d;
+			size = sizeof(struct caf_mp4_esds_decspec);
+			if (CAF_MP4_ESDS_DECSPEC_TAG == caf_mp4_esds_block(&d, end, &size)) {
+				const struct caf_mp4_esds_decspec *spec = (struct caf_mp4_esds_decspec*)d;
 				d += size;
 				ac->conf = (char*)spec->data,  ac->conflen = size;
 				r = 0;

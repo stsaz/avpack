@@ -18,7 +18,7 @@ mp4read_offset
 */
 
 #pragma once
-
+#include <avpack/decl.h>
 #include <avpack/base/mp4.h>
 #include <ffbase/stream.h>
 #include <ffbase/vector.h>
@@ -101,6 +101,7 @@ typedef struct mp4read {
 	void *udata;
 
 	ffuint itunes_smpb :1
+		, codec_conf_pending :1
 		;
 } mp4read;
 
@@ -115,33 +116,25 @@ static inline void _mp4read_log(mp4read *m, const char *fmt, ...)
 	va_end(va);
 }
 
-enum MP4_CODEC {
-	MP4_A_ALAC = 1,
-	MP4_A_AAC,
-	MP4_A_MPEG1,
-
-	MP4_V_AVC1,
-};
-
 enum MP4READ_R {
-	MP4READ_DATA,
+	MP4READ_DATA = AVPK_DATA,
 
 	/** Need input data at absolute file offset = mp4read_offset()
 	Expecting mp4read_process() with more data at the specified offset */
-	MP4READ_SEEK,
+	MP4READ_SEEK = AVPK_SEEK,
 
-	MP4READ_MORE,
-	MP4READ_DONE,
-	MP4READ_WARN,
-	MP4READ_ERROR,
+	MP4READ_MORE = AVPK_MORE,
+	MP4READ_DONE = AVPK_FIN,
+	MP4READ_WARN = AVPK_WARNING,
+	MP4READ_ERROR = AVPK_ERROR,
 
 	/** Header is processed
 	User may call mp4read_track_info() to enumerate all tracks */
-	MP4READ_HEADER,
+	MP4READ_HEADER = AVPK_HEADER,
 
 	/** New tag has been read
 	User may call mp4read_tag() */
-	MP4READ_TAG,
+	MP4READ_TAG = AVPK_META,
 };
 
 /** Get track meta info
@@ -226,6 +219,13 @@ static inline void mp4read_open(mp4read *m)
 	m->seek_sample = -1;
 	m->boxes[0].ctx = mp4_ctx_global;
 	m->boxes[0].size = (ffuint64)-1;
+}
+
+static inline void mp4read_open2(mp4read *m, struct avpk_reader_conf *conf)
+{
+	mp4read_open(m);
+	m->log = conf->log;
+	m->udata = conf->opaque;
 }
 
 static inline void mp4read_close(mp4read *m)
@@ -344,11 +344,11 @@ static inline void mp4read_seek(mp4read *m, ffuint64 sample)
 	(m)->err = (e),  MP4READ_ERROR
 
 /**
-Return 0 or MP4READ_TAG on success;
+Return MP4READ_DATA or MP4READ_TAG on success;
 	MP4READ_ERROR on error */
 static inline int _mp4_box_process(mp4read *m, ffstr sbox)
 {
-	int r, rc = 0, rd;
+	int r, rc = MP4READ_DATA, rd;
 	struct mp4_box *box = &m->boxes[m->ictx];
 	rd = MP4_GET_MINSIZE(box->type);
 
@@ -384,7 +384,7 @@ static inline int _mp4_box_process(mp4read *m, ffstr sbox)
 		if (r < 0)
 			return _MP4R_ERR(m, MP4READ_EDATA);
 		m->curtrack->video.type = 0;
-		m->curtrack->video.codec = MP4_V_AVC1;
+		m->curtrack->video.codec = AVPKC_AVC;
 		m->curtrack->video.codec_name = "H.264";
 		m->curtrack->video.width = v.width;
 		m->curtrack->video.height = v.height;
@@ -396,7 +396,7 @@ static inline int _mp4_box_process(mp4read *m, ffstr sbox)
 			break;
 		if (NULL == ffstr_dup(&m->curtrack->audio.codec_conf, sbox.ptr, sbox.len))
 			return _MP4R_ERR(m, MP4READ_EMEM);
-		m->curtrack->audio.codec = MP4_A_ALAC;
+		m->curtrack->audio.codec = AVPKC_ALAC;
 		m->curtrack->audio.codec_name = "ALAC";
 		break;
 
@@ -408,11 +408,11 @@ static inline int _mp4_box_process(mp4read *m, ffstr sbox)
 
 		switch (ac.type) {
 		case MP4_ESDS_DEC_MPEG4_AUDIO:
-			m->curtrack->audio.codec = MP4_A_AAC;
+			m->curtrack->audio.codec = AVPKC_AAC;
 			m->curtrack->audio.codec_name= "AAC";
 			break;
 		case MP4_ESDS_DEC_MPEG1_AUDIO:
-			m->curtrack->audio.codec = MP4_A_MPEG1;
+			m->curtrack->audio.codec = AVPKC_MP3;
 			m->curtrack->audio.codec_name= "MPEG-1";
 			break;
 		}
@@ -729,4 +729,67 @@ static inline int mp4read_process(mp4read *m, ffstr *input, ffstr *output)
 	// unreachable
 }
 
+static inline int mp4read_process2(mp4read *m, ffstr *input, union avpk_read_result *res)
+{
+	if (m->codec_conf_pending) {
+		m->codec_conf_pending = 0;
+		*(ffstr*)&res->frame = m->curtrack->audio.codec_conf;
+		res->frame.pos = ~0ULL;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = ~0U;
+		return AVPK_DATA;
+	}
+
+	int r = mp4read_process(m, input, (ffstr*)&res->frame);
+	switch (r) {
+	case AVPK_HEADER: {
+		const struct mp4read_audio_info *ai;
+		for (unsigned i = 0;;  i++) {
+			if (!(ai = mp4read_track_info(m, i))) {
+				res->error.message = "No audio track";
+				res->error.offset = ~0ULL;
+				return AVPK_ERROR;
+			}
+			if (ai->type == 1) {
+				mp4read_track_activate(m, i);
+				break;
+			}
+		}
+		res->hdr.codec = ai->codec;
+		res->hdr.sample_rate = ai->format.rate;
+		res->hdr.channels = ai->format.channels;
+		res->hdr.duration = ai->total_samples;
+		res->hdr.delay = ai->enc_delay;
+		res->hdr.padding = ai->end_padding;
+		m->codec_conf_pending = 1;
+		break;
+	}
+
+	case AVPK_META:
+		res->tag.id = m->tag;
+		ffstr_null(&res->tag.name);
+		res->tag.value = m->tagval;
+		break;
+
+	case AVPK_DATA:
+		res->frame.pos = m->cursample;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = m->curtrack->audio.frame_samples;
+		break;
+
+	case AVPK_SEEK:
+		res->seek_offset = m->off;
+		break;
+
+	case AVPK_ERROR:
+	case AVPK_WARNING:
+		res->error.message = mp4read_error(m);
+		res->error.offset = m->off;
+		break;
+	}
+	return r;
+}
+
 #undef _MP4R_ERR
+
+AVPKR_IF_INIT(avpk_mp4, "mp4\0m4a", AVPKF_MP4, mp4read, mp4read_open2, mp4read_process2, mp4read_seek, mp4read_close);

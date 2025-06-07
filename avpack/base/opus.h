@@ -18,7 +18,7 @@ struct opus_hdr {
 	// unused[3]
 };
 
-static inline int opus_hdr_read(const char *d, size_t len, uint *channels, uint *preskip)
+static inline int opus_hdr_read(const char *d, size_t len, unsigned *channels, unsigned *preskip)
 {
 	const struct opus_hdr *h = (void*)d;
 	if (sizeof(struct opus_hdr) > len
@@ -55,7 +55,7 @@ static inline int opus_tags_read(const char *p, size_t len)
 
 static inline int opus_tags_write(char *buf, size_t cap, size_t tags_len)
 {
-	uint n = 8 + tags_len;
+	unsigned n = 8 + tags_len;
 	if (n > cap) return 0;
 
 	ffmem_copy(buf, "OpusTags", 8);

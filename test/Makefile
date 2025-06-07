@@ -11,31 +11,21 @@ ifeq "$(OS)" "windows"
 	TESTER := avpack-test.exe
 endif
 
-OBJ := \
-	aac.o \
-	ape.o \
-	apetag.o \
-	avi.o \
+OBJ := main.o \
 	bmp.o \
-	caf.o \
-	cue.o \
-	flac.o \
-	flacogg.o \
-	icy.o \
 	jpg.o \
-	m3u.o \
-	main.o \
-	mkv.o \
-	mp3.o \
-	mp4.o \
-	mpc.o \
-	ogg.o \
-	pls.o \
 	png.o \
+	\
+	m3u.o \
+	pls.o \
+	\
+	apetag.o \
 	vorbistag.o \
-	wav.o \
-	wv.o \
-	compat.o
+	\
+	cue.o \
+	icy.o \
+	compat.o \
+	reader.o
 
 default: $(TESTER)
 

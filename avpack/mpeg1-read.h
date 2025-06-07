@@ -14,7 +14,7 @@ mpeg1read_cursample
 */
 
 #pragma once
-
+#include <avpack/decl.h>
 #include <avpack/base/mpeg1.h>
 #include <ffbase/string.h>
 #include <ffbase/stream.h>
@@ -59,14 +59,14 @@ static inline void mpeg1read_close(mpeg1read *m)
 }
 
 enum MPEG1READ_R {
-	MPEG1READ_MORE,
-	MPEG1READ_HEADER, // 'output' contains Xing tag data
-	MPEG1READ_DATA, // data packet
+	MPEG1READ_MORE = AVPK_MORE,
+	MPEG1READ_HEADER = AVPK_HEADER, // 'output' contains Xing tag data
+	MPEG1READ_DATA = AVPK_DATA, // data packet
 
 	/** Need input data at absolute file offset = mpeg1read_offset()
 	Expecting mpeg1read_process() with more data at the specified offset */
-	MPEG1READ_SEEK,
-	MPEG1READ_ERROR,
+	MPEG1READ_SEEK = AVPK_SEEK,
+	MPEG1READ_ERROR = AVPK_ERROR,
 };
 
 /** Find MPEG header */

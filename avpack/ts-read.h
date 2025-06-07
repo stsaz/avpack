@@ -12,6 +12,7 @@ tsread_error
 */
 
 #pragma once
+#include <avpack/decl.h>
 #include <avpack/base/ts.h>
 #include <ffbase/stream.h>
 #include <ffbase/map.h>
@@ -59,6 +60,8 @@ static inline void _tsr_log(tsread *t, const char *fmt, ...)
 
 static int _tsr_pids_keyeq(void *opaque, const void *key, ffsize keylen, void *val)
 {
+	(void)opaque;
+	(void)keylen;
 	const struct _tsr_pm *pm = val;
 	ffuint pid = (ffsize)key;
 	return (pid == pm->pid);
@@ -82,11 +85,19 @@ static struct _tsr_pm* _tsr_pm_add(tsread *t, ffuint pid)
 
 static inline void tsread_open(tsread *t, ffuint64 total_size)
 {
+	(void)total_size;
 	t->gather = 188;
 	ffstream_realloc(&t->stream, 188);
 
 	ffmap_init(&t->pms, _tsr_pids_keyeq);
 	_tsr_pm_add_new(t, 0);
+}
+
+static inline void tsread_open2(tsread *t, struct avpk_reader_conf *conf)
+{
+	tsread_open(t, conf->total_size);
+	t->log = conf->log;
+	t->udata = conf->opaque;
 }
 
 static inline void tsread_close(tsread *t)
@@ -102,10 +113,10 @@ static inline void tsread_close(tsread *t)
 }
 
 enum TSREAD_R {
-	TSREAD_ERROR,
-	TSREAD_WARN,
-	TSREAD_MORE,
-	TSREAD_DATA,
+	TSREAD_ERROR = AVPK_ERROR,
+	TSREAD_WARN = AVPK_WARNING,
+	TSREAD_MORE = AVPK_MORE,
+	TSREAD_DATA = AVPK_DATA,
 };
 
 #define _TSR_ERR(t, e) \
@@ -292,6 +303,29 @@ static inline int tsread_process(tsread *t, ffstr *input, ffstr *output)
 	}
 }
 
+static inline int tsread_process2(tsread *t, ffstr *input, union avpk_read_result *res)
+{
+	int r = tsread_process(t, input, (ffstr*)&res->frame);
+	switch (r) {
+	case AVPK_DATA:
+		res->frame.pos = t->cur->pos_msec;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = ~0U;
+		break;
+
+	case AVPK_SEEK:
+		res->seek_offset = t->pkt.off;
+		break;
+
+	case AVPK_ERROR:
+	case AVPK_WARNING:
+		res->error.message = t->error;
+		res->error.offset = t->pkt.off;
+		break;
+	}
+	return r;
+}
+
 static inline const struct _tsr_pm* tsread_info(tsread *t)
 {
 	return t->cur;
@@ -300,3 +334,5 @@ static inline const struct _tsr_pm* tsread_info(tsread *t)
 #define tsread_pos_msec(t)  ((t)->cur->pos_msec)
 
 #define tsread_offset(t)  ((t)->pkt.off)
+
+AVPKR_IF_INIT(avpk_ts, "ts", AVPKF_TS, tsread, tsread_open2, tsread_process2, NULL, tsread_close);

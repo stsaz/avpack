@@ -16,8 +16,9 @@ mkvread_block_trackid
 */
 
 #pragma once
-
+#include <avpack/decl.h>
 #include <avpack/base/mkv.h>
+#include <avpack/vorbistag.h>
 #include <ffbase/stream.h>
 
 struct mkv_el {
@@ -33,7 +34,7 @@ typedef void (*mkv_log_t)(void *udata, const char *fmt, va_list va);
 
 struct mkvread_audio_info {
 	int type; // enum MKV_TRKTYPE
-	ffuint codec; // enum MKV_CODEC
+	ffuint codec; // enum AVPK_CODEC
 	int id;
 
 	ffuint bits;
@@ -45,7 +46,7 @@ struct mkvread_audio_info {
 
 struct mkvread_video_info {
 	int type; // enum MKV_TRKTYPE
-	ffuint codec; // enum MKV_CODEC
+	ffuint codec; // enum AVPK_CODEC
 	int id;
 
 	ffuint64 duration_msec;
@@ -91,6 +92,9 @@ typedef struct mkvread {
 	ffvec lacing; //ffuint[].  Sizes of frames that are placed in a single block.
 	ffsize lacing_off;
 	ffuint64 block_trackid;
+	unsigned sel_track_id, sel_track_index, codec_conf_state;
+	struct mkv_vorbis mkv_vorbis;
+	ffstr mkv_vorbis_data;
 
 	// seeking:
 	struct _mkvread_seekpoint seekpt_glob[2];
@@ -99,6 +103,7 @@ typedef struct mkvread {
 	ffuint64 last_seek_off;
 	ffuint seek_block, seek_cluster;
 	ffuint64 clust_off;
+	unsigned a_sample_rate;
 
 	ffvec tagname;
 	ffstr tagval;
@@ -164,13 +169,13 @@ static inline const char* mkvread_error(mkvread *m)
 
 enum MKVREAD_R {
 	/** Use mkvread_block_trackid() to get track ID */
-	MKVREAD_DATA,
-	MKVREAD_MORE,
-	MKVREAD_HEADER,
-	MKVREAD_SEEK,
-	MKVREAD_DONE,
-	MKVREAD_TAG,
-	MKVREAD_ERROR,
+	MKVREAD_DATA = AVPK_DATA,
+	MKVREAD_MORE = AVPK_MORE,
+	MKVREAD_HEADER = AVPK_HEADER,
+	MKVREAD_SEEK = AVPK_SEEK,
+	MKVREAD_DONE = AVPK_FIN,
+	MKVREAD_TAG = AVPK_META,
+	MKVREAD_ERROR = AVPK_ERROR,
 };
 
 #define _MKVR_ERR(m, e) \
@@ -189,6 +194,13 @@ static inline int mkvread_open(mkvread *m, ffuint64 total_size)
 	m->els[m->ictx].ctx = mkv_ctx_global;
 	ffstream_realloc(&m->stream, 4096);
 	return 0;
+}
+
+static inline void mkvread_open2(mkvread *m, struct avpk_reader_conf *conf)
+{
+	mkvread_open(m, conf->total_size);
+	m->log = conf->log;
+	m->udata = conf->opaque;
 }
 
 static inline void mkvread_close(mkvread *m)
@@ -210,6 +222,11 @@ static inline void mkvread_close(mkvread *m)
 static inline void mkvread_seek(mkvread *m, ffuint64 msec)
 {
 	m->seek_msec = msec;
+}
+
+static inline void mkvread_seek_s(mkvread *m, ffuint64 sample)
+{
+	m->seek_msec = sample * 1000 / m->a_sample_rate;
 }
 
 /** Get track ID of the current data block */
@@ -805,5 +822,103 @@ static inline int mkvread_process(mkvread *m, ffstr *input, ffstr *output)
 	}
 }
 
+static inline int mkvread_process2(mkvread *m, ffstr *input, union avpk_read_result *res)
+{
+	int r, n;
+	switch (m->codec_conf_state) {
+	case 1: {
+		m->codec_conf_state = 0;
+		const struct mkvread_track *t = (struct mkvread_track*)m->tracks.ptr;
+		t = &t[m->sel_track_index];
+		*(ffstr*)&res->frame = t->audio.codec_conf;
+		res->frame.pos = ~0ULL;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = ~0U;
+		return AVPK_DATA;
+	}
+
+	case 2: // VORBIS_INFO
+	case 3: // VORBIS_TAGS
+	case 4: // VORBIS_BOOK
+		r = mkv_vorbis_hdr(&m->mkv_vorbis, &m->mkv_vorbis_data, (ffstr*)&res->frame);
+		if (r == 0) {
+			if (m->codec_conf_state++ == 4)
+				m->codec_conf_state = 0;
+			res->frame.pos = ~0ULL;
+			res->frame.end_pos = ~0ULL;
+			res->frame.duration = ~0U;
+			return AVPK_DATA;
+		}
+		res->error.message = "mkv_vorbis_hdr()";
+		res->error.offset = ~0ULL;
+		return AVPK_ERROR;
+	}
+
+	for (;;) {
+		r = mkvread_process(m, input, (ffstr*)&res->frame);
+		switch (r) {
+		case AVPK_HEADER: {
+			const struct mkvread_audio_info *ai;
+			for (unsigned i = 0;;  i++) {
+				if (!(ai = mkvread_track_info(m, i))) {
+					res->error.message = "No audio track";
+					res->error.offset = ~0ULL;
+					return AVPK_ERROR;
+				}
+				if (ai->type == MKV_TRK_AUDIO) {
+					m->sel_track_id = ai->id;
+					m->sel_track_index = i;
+					break;
+				}
+			}
+			res->hdr.codec = ai->codec;
+			res->hdr.sample_bits = ai->bits;
+			res->hdr.sample_rate = ai->sample_rate;
+			res->hdr.channels = ai->channels;
+			res->hdr.duration = ai->duration_msec * ai->sample_rate / 1000;
+			m->a_sample_rate = ai->sample_rate;
+
+			if (ai->codec_conf.len)
+				m->codec_conf_state = 1;
+			if (ai->codec == AVPKC_VORBIS) {
+				m->mkv_vorbis_data = ai->codec_conf;
+				m->codec_conf_state = 2;
+			}
+			break;
+		}
+
+		case AVPK_META:
+			res->tag.name = *(ffstr*)&m->tagname;
+			res->tag.value = m->tagval;
+			n = ffszarr_ifindsorted(_vorbistag_str, FF_COUNT(_vorbistag_str), res->tag.name.ptr, res->tag.name.len);
+			res->tag.id = (n >= 0) ? _vorbistag_mmtag[n] : 0;
+			break;
+
+		case AVPK_DATA:
+			if (mkvread_block_trackid(m) != m->sel_track_id)
+				continue;
+
+			res->frame.pos = m->curpos * m->a_sample_rate / 1000;
+			res->frame.end_pos = ~0ULL;
+			res->frame.duration = ~0U;
+			break;
+
+		case AVPK_SEEK:
+			res->seek_offset = m->off;
+			break;
+
+		case AVPK_ERROR:
+		case AVPK_WARNING:
+			res->error.message = mkvread_error(m);
+			res->error.offset = m->off;
+			break;
+		}
+
+		return r;
+	}
+}
+
 #undef _MKVR_ERR
 #undef _MKVR_ERRSTR
+
+AVPKR_IF_INIT(avpk_mkv, "mkv", AVPKF_MKV, mkvread, mkvread_open2, mkvread_process2, mkvread_seek_s, mkvread_close);

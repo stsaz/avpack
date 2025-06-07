@@ -18,8 +18,9 @@ cafread_tag
 */
 
 #pragma once
-
+#include <avpack/decl.h>
 #include <avpack/base/caf.h>
+#include <avpack/vorbistag.h>
 #include <ffbase/stream.h>
 #include <ffbase/vector.h>
 
@@ -39,6 +40,7 @@ typedef struct cafread {
 	ffuint64 iframe; // current frame
 	ffuint64 pakt_off; // current offset in 'pakt'
 	ffstr pakt; // packets sizes
+	unsigned codec_conf_pending :1;
 
 	ffstr tagname;
 	ffstr tagval;
@@ -50,14 +52,14 @@ typedef struct cafread {
 } cafread;
 
 enum CAFREAD_R {
-	CAFREAD_ERROR,
-	CAFREAD_MORE,
-	CAFREAD_MORE_OR_DONE, // can process more data if there's any
-	CAFREAD_SEEK,
-	CAFREAD_HEADER,
-	CAFREAD_TAG,
-	CAFREAD_DATA,
-	CAFREAD_DONE,
+	CAFREAD_ERROR = AVPK_ERROR,
+	CAFREAD_MORE = AVPK_MORE,
+	CAFREAD_SEEK = AVPK_SEEK,
+	CAFREAD_HEADER = AVPK_HEADER,
+	CAFREAD_TAG = AVPK_META,
+	CAFREAD_DATA = AVPK_DATA,
+	CAFREAD_DONE = AVPK_FIN,
+	CAFREAD_MORE_OR_DONE = AVPK_MORE, // can process more data if there's any
 };
 
 #define cafread_offset(c)  (c)->inoff
@@ -86,6 +88,13 @@ static inline int cafread_open(cafread *c)
 {
 	ffstream_realloc(&c->stream, 4*1024);
 	return 0;
+}
+
+static inline void cafread_open2(cafread *c, struct avpk_reader_conf *conf)
+{
+	cafread_open(c);
+	c->log = conf->log;
+	c->udata = conf->opaque;
 }
 
 static inline void cafread_close(cafread *c)
@@ -234,15 +243,15 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 			c->chunk.len = c->chunk_size;
 			ffstr_free(&c->info.codec_conf);
 			switch (c->info.codec) {
-			case CAF_AAC: {
-				struct mp4_acodec ac;
-				if (0 != mp4_esds_read(c->chunk.ptr, c->chunk.len, &ac))
+			case AVPKC_AAC: {
+				struct caf_mp4_acodec ac;
+				if (0 != caf_mp4_esds_read(c->chunk.ptr, c->chunk.len, &ac))
 					return _CAFR_ERR(c, "bad esds data");
 				c->info.bitrate = ac.avg_brate;
 				ffstr_dup(&c->info.codec_conf, ac.conf, ac.conflen);
 				break;
 			}
-			case CAF_ALAC: {
+			case AVPKC_ALAC: {
 				ffstr conf;
 				if (0 != kuki_alac_read(c->chunk, &conf))
 					return _CAFR_ERR(c, "bad ALAC config");
@@ -288,7 +297,7 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 				if (r < 0)
 					return _CAFR_ERR(c, "bad audio chunk");
 				c->pakt_off += r;
-			} else if (c->info.codec == CAF_LPCM) {
+			} else if (c->info.codec == AVPKC_PCM) {
 				ffuint n = ffmin(ffstream_used(&c->stream), c->chunk_size) / sz; // take as many samples as we can
 				if (n != 0) {
 					c->nframes = n;
@@ -321,4 +330,60 @@ static inline int cafread_process(cafread *c, ffstr *input, ffstr *output)
 	}
 }
 
+static inline int cafread_process2(cafread *c, ffstr *input, union avpk_read_result *res)
+{
+	if (c->codec_conf_pending) {
+		c->codec_conf_pending = 0;
+		*(ffstr*)&res->frame = c->info.codec_conf;
+		res->frame.pos = ~0ULL;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = ~0U;
+		return AVPK_DATA;
+	}
+
+	int r = cafread_process(c, input, (ffstr*)&res->frame), n;
+	switch (r) {
+	case AVPK_HEADER:
+		if (!(c->info.format & CAF_FMT_LE)) {
+			res->error.message = "big-endian data isn't supported";
+			res->error.offset = ~0ULL;
+			return AVPK_ERROR;
+		}
+		res->hdr.codec = c->info.codec;
+		res->hdr.sample_bits = c->info.format & 0xff;
+		res->hdr.sample_float = !!(c->info.format & CAF_FMT_FLOAT);
+		res->hdr.sample_rate = c->info.sample_rate;
+		res->hdr.channels = c->info.channels;
+		res->hdr.duration = c->info.total_frames;
+		c->codec_conf_pending = 1;
+		break;
+
+	case AVPK_META:
+		res->tag.name = c->tagname;
+		res->tag.value = c->tagval;
+		n = ffszarr_ifindsorted(_vorbistag_str, FF_COUNT(_vorbistag_str), res->tag.name.ptr, res->tag.name.len);
+		res->tag.id = (n >= 0) ? _vorbistag_mmtag[n] : 0;
+		break;
+
+	case AVPK_DATA:
+		res->frame.pos = c->iframe - c->nframes;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = ~0U;
+		break;
+
+	case AVPK_SEEK:
+		res->seek_offset = c->inoff;
+		break;
+
+	case AVPK_ERROR:
+	case AVPK_WARNING:
+		res->error.message = c->error;
+		res->error.offset = c->inoff;
+		break;
+	}
+	return r;
+}
+
 #undef _CAFR_ERR
+
+AVPKR_IF_INIT(avpk_caf, "caf", AVPKF_CAF, cafread, cafread_open2, cafread_process2, NULL, cafread_close);

@@ -15,7 +15,7 @@ wavread_tag
 */
 
 #pragma once
-
+#include <avpack/decl.h>
 #include <avpack/base/wav.h>
 #include <ffbase/vector.h>
 
@@ -106,19 +106,26 @@ static inline void wavread_open(wavread *w)
 	w->chunks[0].size = (ffuint)-1;
 }
 
+static inline void wavread_open2(wavread *w, struct avpk_reader_conf *conf)
+{
+	wavread_open(w);
+	w->log = conf->log;
+	w->udata = conf->opaque;
+}
+
 static inline void wavread_close(wavread *w)
 {
 	ffvec_free(&w->buf);
 }
 
 enum WAVREAD_R {
-	WAVREAD_MORE,
-	WAVREAD_HEADER,
-	WAVREAD_SEEK,
-	WAVREAD_DATA,
-	WAVREAD_DONE,
-	WAVREAD_TAG,
-	WAVREAD_ERROR,
+	WAVREAD_MORE = AVPK_MORE,
+	WAVREAD_HEADER = AVPK_HEADER,
+	WAVREAD_SEEK = AVPK_SEEK,
+	WAVREAD_DATA = AVPK_DATA,
+	WAVREAD_DONE = AVPK_FIN,
+	WAVREAD_TAG = AVPK_META,
+	WAVREAD_ERROR = AVPK_ERROR,
 };
 
 static int _wavread_chunk(wavread *w)
@@ -172,7 +179,7 @@ static int _wavread_chunk(wavread *w)
 		return WAVREAD_HEADER;
 	}
 
-	return 0;
+	return WAVREAD_MORE;
 }
 
 /**
@@ -318,7 +325,7 @@ static inline int wavread_process(wavread *w, ffstr *input, ffstr *output)
 				w->state = R_SKIP;
 				continue;
 
-			case 0:
+			case WAVREAD_MORE:
 				break;
 			}
 
@@ -372,6 +379,44 @@ static inline int wavread_process(wavread *w, ffstr *input, ffstr *output)
 	//unreachable
 }
 
+static inline int wavread_process2(wavread *w, ffstr *input, union avpk_read_result *res)
+{
+	int r = wavread_process(w, input, (ffstr*)&res->frame);
+	switch (r) {
+	case AVPK_HEADER:
+		res->hdr.codec = AVPKC_PCM;
+		res->hdr.sample_bits = w->info.format & 0xff;
+		res->hdr.sample_float = (w->info.format == WAV_FLOAT);
+		res->hdr.sample_rate = w->info.sample_rate;
+		res->hdr.channels = w->info.channels;
+		res->hdr.duration = w->info.total_samples;
+		break;
+
+	case AVPK_META:
+		res->tag.id = w->tag;
+		ffstr_null(&res->tag.name);
+		res->tag.value = w->tagval;
+		break;
+
+	case AVPK_DATA:
+		res->frame.pos = w->cursample;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = w->samples;
+		break;
+
+	case AVPK_SEEK:
+		res->seek_offset = w->off;
+		break;
+
+	case AVPK_ERROR:
+	case AVPK_WARNING:
+		res->error.message = w->errmsg;
+		res->error.offset = w->off;
+		break;
+	}
+	return r;
+}
+
 #undef _WAVR_ERR
 
 static inline const struct wav_info* wavread_info(wavread *w)
@@ -394,3 +439,5 @@ static inline int wavread_tag(wavread *w, ffstr *val)
 
 #define wavread_offset(w)  ((w)->off)
 #define wavread_cursample(w)  ((w)->cursample)
+
+AVPKR_IF_INIT(avpk_wav, "wav", AVPKF_WAV, wavread, wavread_open2, wavread_process2, wavread_seek, wavread_close);

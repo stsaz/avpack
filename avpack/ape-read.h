@@ -16,6 +16,7 @@ aperead_align4
 */
 
 #pragma once
+#include <avpack/decl.h>
 #include <avpack/base/ape.h>
 #include <avpack/id3v1.h>
 #include <avpack/apetag.h>
@@ -27,7 +28,7 @@ typedef struct aperead {
 	const char *error;
 	ffvec buf;
 	ffstr chunk;
-	ffuint gather_size;
+	ffuint gather_size, hdr_len;
 	struct ape_info info;
 	ffuint64 total_size;
 	ffuint64 off;
@@ -47,25 +48,17 @@ typedef struct aperead {
 
 enum APEREAD_R {
 	/** New tag is read: use aperead_tag() */
-	APEREAD_ID31 = 1,
-	APEREAD_APETAG,
-
-	/** Need more input data */
-	APEREAD_MORE,
+	APEREAD_ID31 = AVPK_META,
+	APEREAD_APETAG = AVPK_META,
+	APEREAD_MORE = AVPK_MORE,
 
 	/** Output contains file header */
-	APEREAD_HEADER,
-
-	/** Output contains audio data block */
-	APEREAD_DATA,
-
-	APEREAD_DONE,
-
-	/** Need more input data at offset aperead_offset() */
-	APEREAD_SEEK,
-
-	APEREAD_ERROR,
-	APEREAD_WARN,
+	APEREAD_HEADER = AVPK_HEADER,
+	APEREAD_DATA = AVPK_DATA,
+	APEREAD_DONE = AVPK_FIN,
+	APEREAD_SEEK = AVPK_SEEK,
+	APEREAD_ERROR = AVPK_ERROR,
+	APEREAD_WARN = AVPK_WARNING,
 };
 
 #define _APER_ERR(a, msg) \
@@ -80,6 +73,11 @@ static inline void aperead_open(aperead *a, ffuint64 total_size)
 {
 	a->total_size = total_size;
 	a->seek_sample = (ffuint64)-1;
+}
+
+static inline void aperead_open2(aperead *a, struct avpk_reader_conf *conf)
+{
+	aperead_open(a, conf->total_size);
 }
 
 static inline void aperead_close(aperead *a)
@@ -276,6 +274,54 @@ static inline int aperead_process(aperead *a, ffstr *input, ffstr *output)
 	}
 }
 
+static inline int aperead_process2(aperead *a, ffstr *input, union avpk_read_result *res)
+{
+	if (a->hdr_len) {
+		ffstr_set(&res->frame, a->chunk.ptr, a->hdr_len);
+		a->hdr_len = 0;
+		res->frame.pos = ~0ULL;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = ~0U;
+		return AVPK_DATA;
+	}
+
+	int r = aperead_process(a, input, (ffstr*)&res->frame);
+	switch (r) {
+	case AVPK_HEADER:
+		a->hdr_len = res->frame.len;
+		ffmem_zero_obj(&res->frame);
+		res->hdr.codec = AVPKC_APE;
+		res->hdr.sample_bits = a->info.bits;
+		res->hdr.sample_rate = a->info.sample_rate;
+		res->hdr.channels = a->info.channels;
+		res->hdr.duration = a->info.total_samples;
+		break;
+
+	case AVPK_META:
+		res->tag.id = a->tag;
+		res->tag.name = a->tagname;
+		res->tag.value = a->tagval;
+		break;
+
+	case AVPK_DATA:
+		res->frame.pos = a->block_start;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = a->block_samples;
+		break;
+
+	case AVPK_SEEK:
+		res->seek_offset = a->off;
+		break;
+
+	case AVPK_ERROR:
+	case AVPK_WARNING:
+		res->error.message = a->error;
+		res->error.offset = a->off;
+		break;
+	}
+	return r;
+}
+
 static inline void aperead_seek(aperead *a, ffuint64 sample)
 {
 	a->seek_sample = sample;
@@ -297,3 +343,5 @@ static inline int aperead_tag(aperead *a, ffstr *name, ffstr *val)
 #define aperead_align4(a)  ((a)->align4)
 
 #undef _APER_ERR
+
+AVPKR_IF_INIT(avpk_ape, "ape", AVPKF_APE, aperead, aperead_open2, aperead_process2, aperead_seek, aperead_close);

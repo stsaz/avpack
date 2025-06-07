@@ -16,7 +16,7 @@ aviread_offset
 */
 
 #pragma once
-
+#include <avpack/decl.h>
 #include <avpack/base/avi.h>
 #include <ffbase/vector.h>
 
@@ -57,6 +57,7 @@ typedef struct aviread {
 	ffstr tagval;
 
 	ffuint has_fmt :1
+		, codec_conf_pending :1
 		;
 
 	avi_log_t log;
@@ -67,6 +68,13 @@ static inline void aviread_open(aviread *a)
 {
 	a->chunks[0].ctx = avi_ctx_global;
 	a->chunks[0].size = (ffuint)-1;
+}
+
+static inline void aviread_open2(aviread *a, struct avpk_reader_conf *conf)
+{
+	aviread_open(a);
+	a->log = conf->log;
+	a->udata = conf->opaque;
 }
 
 static inline void aviread_close(aviread *a)
@@ -112,12 +120,12 @@ static inline int aviread_tag(aviread *a, ffstr *val)
 #define aviread_offset(a)  ((a)->off)
 
 enum AVIREAD_R {
-	AVIREAD_DATA,
-	AVIREAD_MORE,
-	AVIREAD_HEADER,
-	AVIREAD_DONE,
-	AVIREAD_TAG,
-	AVIREAD_ERROR,
+	AVIREAD_DATA = AVPK_DATA,
+	AVIREAD_MORE = AVPK_MORE,
+	AVIREAD_HEADER = AVPK_HEADER,
+	AVIREAD_DONE = AVPK_FIN,
+	AVIREAD_TAG = AVPK_META,
+	AVIREAD_ERROR = AVPK_ERROR,
 };
 
 enum AVI_E {
@@ -232,17 +240,17 @@ static int _aviread_chunk(aviread *a)
 		}
 
 		if (chunk->size == 0) {
-			return 0;
+			return AVIREAD_MORE;
 		}
 
 		struct avi_audio_info *ai = a->curtrack;
-		if (ai->codec == AVI_A_PCM) {
+		if (ai->codec == AVPKC_PCM) {
 			ai->blocksize = chunk->size / (ai->bits/8 * ai->channels);
 		}
 
 		a->gather_size = chunk->size;
 		chunk->size = 0;
-		return 0xdada;
+		return AVIREAD_DATA;
 	}
 
 	default:
@@ -253,7 +261,7 @@ static int _aviread_chunk(aviread *a)
 		}
 	}
 
-	return 0;
+	return AVIREAD_MORE;
 }
 
 /**
@@ -381,7 +389,7 @@ static inline int aviread_process(aviread *a, ffstr *input, ffstr *output)
 		case R_CHUNK:
 			r = _aviread_chunk(a);
 			switch (r) {
-			case 0xdada:
+			case AVIREAD_DATA:
 				a->state = R_GATHER;  a->nxstate = R_DATA;
 				continue;
 
@@ -396,7 +404,7 @@ static inline int aviread_process(aviread *a, ffstr *input, ffstr *output)
 			case AVIREAD_ERROR:
 				return AVIREAD_ERROR;
 
-			case 0:
+			case AVIREAD_MORE:
 				break;
 			}
 
@@ -418,4 +426,62 @@ static inline int aviread_process(aviread *a, ffstr *input, ffstr *output)
 	}
 }
 
+static inline int aviread_process2(aviread *a, ffstr *input, union avpk_read_result *res)
+{
+	if (a->codec_conf_pending) {
+		a->codec_conf_pending = 0;
+		*(ffstr*)&res->frame = a->curtrack->codec_conf;
+		res->frame.pos = ~0ULL;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = ~0U;
+		return AVPK_DATA;
+	}
+
+	int r = aviread_process(a, input, (ffstr*)&res->frame);
+	switch (r) {
+	case AVPK_HEADER: {
+		const struct avi_audio_info *ai;
+		for (unsigned i = 0;;  i++) {
+			if (!(ai = aviread_track_info(a, i))) {
+				res->error.message = "No audio track";
+				res->error.offset = ~0ULL;
+				return AVPK_ERROR;
+			}
+			if (ai->type == 1) {
+				aviread_track_activate(a, i);
+				break;
+			}
+		}
+		res->hdr.codec = ai->codec;
+		res->hdr.sample_bits = ai->bits;
+		res->hdr.sample_rate = ai->sample_rate;
+		res->hdr.channels = ai->channels;
+		res->hdr.duration = ai->duration_msec * ai->sample_rate / 1000;
+		a->codec_conf_pending = 1;
+		break;
+	}
+
+	case AVPK_META:
+		res->tag.id = a->tag;
+		ffstr_null(&res->tag.name);
+		res->tag.value = a->tagval;
+		break;
+
+	case AVPK_DATA:
+		res->frame.pos = a->nsamples - a->curtrack->blocksize;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = a->curtrack->blocksize;
+		break;
+
+	case AVPK_ERROR:
+	case AVPK_WARNING:
+		res->error.message = aviread_error(a);
+		res->error.offset = ~0ULL;
+		break;
+	}
+	return r;
+}
+
 #undef _AVIR_ERR
+
+AVPKR_IF_INIT(avpk_avi, "avi", AVPKF_AVI, aviread, aviread_open2, aviread_process2, NULL, aviread_close);

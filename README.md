@@ -76,21 +76,60 @@ and `AVPACK_DIR` is your avpack/ directory.
 		#include <avpack/mp4-write.h>
 
 
-### Reader interface
+### Audio File Format Reader
 
-Each format reader has a similar set of functions:
+```C
+	#include <avpack/reader.h>
 
-* `mp4read_open()` - Open reader object
-* `mp4read_close()` - Close reader object
-* `mp4read_process()` - Process the input data supplied by user and return result:
-	* `MP4READ_DATA` - User receives output data - a whole a/v frame
-	* `MP4READ_MORE` - User must call the function again with the next chunk of input data
-	* `MP4READ_HEADER` - File header is processed and avpack is ready to read a/v frames
-	* `MP4READ_SEEK` - User must call the function again with a chunk of input data at the offset returned by `mp4read_offset()`
-	* `MP4READ_DONE` - All data is processed
-	* `MP4READ_ERROR` - An error is encountered during processing.  User may call `mp4read_error()` to get error message.
-* `mp4read_seek()` - Begin the process of seeking to a specific audio position
+	static const struct avpkr_if *const avpk_formats[] = {
+		&avpk_mp3,
+		...
+	};
 
+	struct avpk_reader_conf ac = {
+		.total_size = ...,
+	};
+	avpk_reader ar = {};
+	if (avpk_open(&ar, avpk_reader_find("mp3", avpk_formats, FF_COUNT(avpk_formats)), &ac))
+		goto fin;
+	ffstr in = {};
+	for (;;) {
+		union avpk_read_result res = {};
+		switch (avpk_read(&ar, &in, &res)) {
+		case AVPK_HEADER:
+			// read res.hdr
+			break;
+
+		case AVPK_META:
+			// read res.tag
+			break;
+
+		case AVPK_DATA:
+			// read res.frame
+			break;
+
+		case AVPK_SEEK:
+			// seek to res.seek_offset
+			// fallthrough
+		case AVPK_MORE:
+			in = ...;
+			break;
+
+		case AVPK_FIN:
+			goto fin;
+
+		case AVPK_WARNING:
+			// read res.error
+			break;
+		case AVPK_ERROR:
+			// read res.error
+			goto fin;
+		}
+	}
+
+fin:
+	avpk_close(&ar);
+```
 
 ### Writer interface
 

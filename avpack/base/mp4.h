@@ -152,9 +152,6 @@ struct mp4_bbox {
 #define MP4_PRIO(n)  ((n) << 16)
 #define MP4_GET_PRIO(flags)  ((flags & 0x00ff0000) >> 16)
 
-extern const struct mp4_bbox mp4_ctx_global[];
-extern const struct mp4_bbox mp4_ctx_global_stream[];
-
 
 /** Search box in the context.
 Return -1 if not found. */
@@ -1052,12 +1049,12 @@ static const struct mp4_bbox
 	mp4_ctx_data[],
 	mp4_ctx_itunes[];
 
-const struct mp4_bbox mp4_ctx_global[] = {
+static const struct mp4_bbox mp4_ctx_global[] = {
 	{"ftyp", BOX_FTYP | MP4_PRIO(1) | MP4_MINSIZE(sizeof(struct mp4_ftyp)), NULL},
 	{"moov", BOX_MOOV | MP4_PRIO(2), mp4_ctx_moov},
 	{"mdat", BOX_MDAT | MP4_PRIO(2) | MP4_F_LAST, NULL},
 };
-const struct mp4_bbox mp4_ctx_global_stream[] = {
+static const struct mp4_bbox mp4_ctx_global_stream[] = {
 	{"ftyp", BOX_FTYP | MP4_MINSIZE(sizeof(struct mp4_ftyp)), NULL},
 	{"mdat", BOX_MDAT, NULL},
 	{"moov", BOX_MOOV | MP4_F_LAST, mp4_ctx_moov},

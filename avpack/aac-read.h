@@ -13,21 +13,23 @@ aacadts_find
 */
 
 #pragma once
+#include <avpack/decl.h>
 #include <avpack/base/adts.h>
 #include <ffbase/stream.h>
 
 
 enum AACREAD_R {
-	AACREAD_MORE,
-	AACREAD_DATA,
-	AACREAD_FRAME,
-	AACREAD_HEADER, // output data contains MPEG-4 ASC
-	AACREAD_ERROR,
-	AACREAD_WARN,
+	AACREAD_MORE = AVPK_MORE,
+	AACREAD_DATA = AVPK_DATA,
+	AACREAD_FRAME = AVPK_DATA,
+	AACREAD_HEADER = AVPK_HEADER, // output data contains MPEG-4 ASC
+	AACREAD_SEEK = AVPK_SEEK,
+	AACREAD_ERROR = AVPK_ERROR,
+	AACREAD_WARN = AVPK_WARNING,
 };
 
 enum AACREAD_OPT {
-	AACREAD_WHOLEFRAME = 1, // return the whole frames with header, not just their body
+	AACREAD_WHOLEFRAME = AVPKR_F_AAC_FRAMES, // return the whole frames with header, not just their body
 };
 
 struct aacread_info {
@@ -40,11 +42,12 @@ typedef struct aacread {
 	ffuint state, nextstate;
 	ffuint gather_size;
 	const char *error;
-	ffuint64 off;
+	ffuint64 pos, seek, size, duration, off;
 	ffuint frlen;
 	ffstream stream;
 	ffstr chunk;
 	char asc[2];
+	unsigned asc_ready :1;
 	ffbyte first_hdr[7];
 
 	struct aacread_info info;
@@ -58,6 +61,13 @@ static inline const char* aacread_error(aacread *a)
 
 static inline void aacread_open(aacread *a)
 {
+	ffstream_realloc(&a->stream, 4096);
+}
+
+static inline void aacread_open2(aacread *a, struct avpk_reader_conf *conf)
+{
+	a->size = conf->total_size;
+	a->options = conf->flags;
 	ffstream_realloc(&a->stream, 4096);
 }
 
@@ -153,6 +163,7 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 	enum {
 		R_HDR_FIND, R_HDR2, R_HDR, R_CRC, R_DATA, R_FR,
 		R_GATHER,
+		R_SEEK = 10,
 	};
 	int r;
 	struct adts_hdr h;
@@ -224,17 +235,63 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 		case R_DATA:
 			ffstr_shift(&a->chunk, 7);
 			// fallthrough
-		case R_FR: {
-			*output = a->chunk;
+		case R_FR:
+			a->pos += 1024;
 			ffstream_consume(&a->stream, a->gather_size);
-			ffuint st = a->state;
 			a->state = R_GATHER,  a->nextstate = R_HDR,  a->gather_size = 7;
-			if (st == R_FR)
-				return AACREAD_FRAME;
+			if (a->seek > a->pos - 1024)
+				continue;
+			*output = a->chunk;
 			return AACREAD_DATA;
-		}
+
+		case R_SEEK:
+			ffstream_reset(&a->stream);
+			a->state = R_HDR_FIND;
+			a->off = a->pos * a->size / a->duration;
+			return AACREAD_SEEK;
 		}
 	}
+}
+
+static inline int aacread_process2(aacread *a, ffstr *input, union avpk_read_result *res)
+{
+	if (a->asc_ready) {
+		a->asc_ready = 0;
+		ffstr_set(&res->frame, a->asc, 2);
+		res->frame.pos = ~0ULL;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = ~0U;
+		return AVPK_DATA;
+	}
+
+	int r = aacread_process(a, input, (ffstr*)&res->frame);
+	switch (r) {
+	case AVPK_HEADER:
+		ffmem_zero_obj(&res->frame);
+		res->hdr.codec = AVPKC_AAC;
+		res->hdr.sample_rate = a->info.sample_rate;
+		res->hdr.channels = a->info.channels;
+		res->hdr.duration = 0;
+		a->asc_ready = 1;
+		break;
+
+	case AVPK_DATA:
+		res->frame.pos = a->pos - 1024;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = 1024;
+		break;
+
+	case AVPK_SEEK:
+		res->seek_offset = a->off;
+		break;
+
+	case AVPK_ERROR:
+	case AVPK_WARNING:
+		res->error.message = a->error;
+		res->error.offset = a->off;
+		break;
+	}
+	return r;
 }
 
 static inline const struct aacread_info* aacread_info(aacread *a)
@@ -242,5 +299,18 @@ static inline const struct aacread_info* aacread_info(aacread *a)
 	return &a->info;
 }
 
+static inline void aacread_seek(aacread *a, ffuint64 sample)
+{
+	a->seek = ffint_align_floor2(sample, 1024);
+	if (!a->size || !a->duration)
+		return;
+	a->pos = a->seek;
+	a->seek = 0;
+	a->state = 10; // R_SEEK
+}
+
 #define aacread_frame_samples(a)  1024
+#define aacread_pos(a)  ((a)->pos - 1024)
 #define aacread_offset(a)  (a)->off
+
+AVPKR_IF_INIT(avpk_aac, "aac", AVPKF_AAC, aacread, aacread_open2, aacread_process2, aacread_seek, aacread_close);

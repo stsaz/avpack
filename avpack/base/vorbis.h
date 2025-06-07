@@ -15,9 +15,9 @@ struct vorbis_info {
 	ffbyte framing_bit; //1
 };
 
-static inline int vorbis_info_read(const char *d, size_t len, uint *channels, uint *rate, uint *br_nominal)
+static inline int vorbis_info_read(const char *d, size_t len, unsigned *channels, unsigned *rate, unsigned *br_nominal)
 {
-	uint n = 7 + sizeof(struct vorbis_info);
+	unsigned n = 7 + sizeof(struct vorbis_info);
 	const struct vorbis_info *vi = (void*)(d + 7);
 	if (n > len
 		|| ffmem_cmp(d, "\x01vorbis", 7)
@@ -39,9 +39,9 @@ static inline int vorbis_tags_read(const char *d, size_t len)
 	return 0;
 }
 
-static inline uint vorbis_tags_write(char *buf, size_t cap, size_t tags_len)
+static inline unsigned vorbis_tags_write(char *buf, size_t cap, size_t tags_len)
 {
-	uint n = 8 + tags_len;
+	unsigned n = 8 + tags_len;
 	if (n > cap) return 0;
 
 	ffmem_copy(buf, "\x03vorbis", 7);

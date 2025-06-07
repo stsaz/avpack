@@ -6,28 +6,16 @@
 #include <test/test.h>
 #include <avpack/shared.h>
 
-extern void test_aac();
-extern void test_ape();
 extern void test_apetag();
-extern void test_avi();
 extern void test_bmp();
-extern void test_caf();
 extern void test_cue();
-extern void test_flac();
-extern void test_flacogg();
 extern void test_icy();
 extern void test_jpg();
 extern void test_m3u();
-extern void test_mkv();
-extern void test_mp3();
-extern void test_mp4();
-extern void test_mpc();
-extern void test_ogg();
 extern void test_pls();
 extern void test_png();
 extern void test_vorbistag();
-extern void test_wav();
-extern void test_wv();
+extern int test_reader(ffstr data, const char *ext);
 void test_gather();
 
 struct test {
@@ -36,29 +24,16 @@ struct test {
 };
 #define T(nm) { #nm, &test_ ## nm }
 static const struct test atests[] = {
-	T(aac),
-	T(ape),
 	T(apetag),
-	T(avi),
 	T(bmp),
-	T(caf),
 	T(cue),
-	T(flac),
-	T(flacogg),
 	T(gather),
 	T(icy),
 	T(jpg),
 	T(m3u),
-	T(mkv),
-	T(mp3),
-	T(mp4),
-	T(mpc),
-	T(ogg),
 	T(pls),
 	T(png),
 	T(vorbistag),
-	T(wav),
-	T(wv),
 };
 #undef T
 
@@ -123,6 +98,23 @@ int main(int argc, const char **argv)
 		ffvec_addsz(&v, "\nOptions:\n-v  Verbose");
 		xlog("%S", &v);
 		ffvec_free(&v);
+		return 0;
+	}
+
+	if (ffsz_eq(argv[1], "reader")) {
+		for (int i = 2;  i < argc;  i++) {
+			ffstr v = {};
+			file_readall(argv[i], &v);
+			ffstr s = FFSTR_INITZ(argv[i]);
+			int r = ffstr_rfindchar(&s, '.');
+			if (r >= 0) {
+				ffstr_shift(&s, r + 1);
+				ffstr_lower(&s);
+				xlog("%s", argv[i]);
+				x(test_reader(v, s.ptr));
+			}
+			ffstr_free(&v);
+		}
 		return 0;
 	}
 

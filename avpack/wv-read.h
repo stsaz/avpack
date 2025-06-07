@@ -14,6 +14,7 @@ wvread_tag
 */
 
 #pragma once
+#include <avpack/decl.h>
 #include <avpack/base/wv.h>
 #include <avpack/id3v1.h>
 #include <avpack/apetag.h>
@@ -47,7 +48,7 @@ typedef struct wvread {
 	ffuint64 off;
 
 	ffuint block_index, block_samples;
-	ffuint hdr_ok;
+	ffuint hdr_ok, hdr_state;
 
 	struct wv_seekpoint seekpt[2];
 	ffuint64 last_seek_off;
@@ -65,20 +66,20 @@ typedef struct wvread {
 
 enum WVREAD_R {
 	/** New tag is read: use wvread_tag() */
-	WVREAD_ID31 = 1,
-	WVREAD_APETAG,
+	WVREAD_ID31 = AVPK_META,
+	WVREAD_APETAG = AVPK_META,
 
 	/** Need more input data */
-	WVREAD_MORE,
+	WVREAD_MORE = AVPK_MORE,
 
 	/** Output contains audio data block */
-	WVREAD_DATA,
+	WVREAD_DATA = AVPK_DATA,
 
 	/** Need more input data at offset wvread_offset() */
-	WVREAD_SEEK,
+	WVREAD_SEEK = AVPK_SEEK,
 
-	WVREAD_ERROR,
-	WVREAD_WARN,
+	WVREAD_ERROR = AVPK_ERROR,
+	WVREAD_WARN = AVPK_WARNING,
 };
 
 #define _WVR_ERR(w, msg) \
@@ -95,6 +96,12 @@ static inline void wvread_open(wvread *w, ffuint64 total_size)
 {
 	w->total_size = total_size;
 	w->seek_sample = (ffuint64)-1;
+}
+
+static inline void wvread_open2(wvread *w, struct avpk_reader_conf *conf)
+{
+	wvread_open(w, conf->total_size);
+	w->id3v1.codepage = conf->code_page;
 }
 
 static inline void wvread_close(wvread *w)
@@ -248,6 +255,10 @@ static inline int wvread_process(wvread *w, ffstr *input, ffstr *output)
 		R_GATHER, R_GATHER_MORE,
 	};
 	int r;
+
+	ffstr empty = {};
+	if ((w->eof = !input))
+		input = &empty;
 
 	for (;;) {
 		switch (w->state) {
@@ -446,6 +457,55 @@ seek_edge:
 	}
 }
 
+static inline int wvread_process2(wvread *w, ffstr *input, union avpk_read_result *res)
+{
+	if (w->hdr_state == 1) {
+		w->hdr_state = 2;
+		*(ffstr*)&res->frame = w->chunk;
+		res->frame.pos = w->block_index;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = w->block_samples;
+		return AVPK_DATA;
+	}
+
+	int r = wvread_process(w, input, (ffstr*)&res->frame);
+	switch (r) {
+	case AVPK_META:
+		res->tag.id = w->tag;
+		res->tag.name = w->tagname;
+		res->tag.value = w->tagval;
+		break;
+
+	case AVPK_DATA:
+		if (!w->hdr_state) {
+			w->hdr_state = 1;
+			ffmem_zero_obj(res);
+			res->hdr.codec = AVPKC_WAVPACK;
+			res->hdr.sample_bits = w->info.bits;
+			res->hdr.sample_float = w->info.flt;
+			res->hdr.sample_rate = w->info.sample_rate;
+			res->hdr.channels = w->info.channels;
+			res->hdr.duration = w->info.total_samples;
+			return AVPK_HEADER;
+		}
+		res->frame.pos = w->block_index;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = w->block_samples;
+		break;
+
+	case AVPK_SEEK:
+		res->seek_offset = w->off;
+		break;
+
+	case AVPK_ERROR:
+	case AVPK_WARNING:
+		res->error.message = w->error;
+		res->error.offset = w->off;
+		break;
+	}
+	return r;
+}
+
 static inline const struct wvread_info* wvread_info(wvread *w)
 {
 	return &w->info;
@@ -467,8 +527,8 @@ static inline int wvread_tag(wvread *w, ffstr *name, ffstr *val)
 
 #define wvread_offset(w)  ((w)->off)
 
-#define wvread_eof(w, val)  ((w)->eof = val)
-
 #define wvread_cursample(w)  ((w)->block_index)
 
 #undef _WVR_ERR
+
+AVPKR_IF_INIT(avpk_wv, "wv", AVPKF_WV, wvread, wvread_open2, wvread_process2, wvread_seek, wvread_close);

@@ -12,7 +12,6 @@ flacread_offset
 flacread_cursample
 flacread_samples
 flacread_meta_type flacread_meta_offset
-flacread_finish
 */
 
 /* .flac format:
@@ -20,7 +19,7 @@ fLaC (HDR STREAMINFO) [HDR BLOCK]... (FRAME_HDR SUBFRAME... FRAME_FOOTER)...
 */
 
 #pragma once
-
+#include <avpack/decl.h>
 #include <avpack/base/flac.h>
 #include <ffbase/stream.h>
 #include <ffbase/vector.h>
@@ -41,6 +40,7 @@ typedef struct flacread {
 	ffuint last_hdr_block;
 	ffuint meta_type;
 
+	struct flac_streaminfo streaminfo;
 	struct flac_info info;
 
 	ffuint frame1_off;
@@ -55,14 +55,14 @@ typedef struct flacread {
 } flacread;
 
 enum FLACREAD_R {
-	FLACREAD_MORE,
-	FLACREAD_DATA,
-	FLACREAD_SEEK, // Use flacread_offset()
-	FLACREAD_DONE,
-	FLACREAD_HEADER,
-	FLACREAD_META_BLOCK, // Output whole meta block body. Use flacread_meta_type() and flacread_meta_offset().
-	FLACREAD_HEADER_FIN,
-	FLACREAD_ERROR,
+	FLACREAD_MORE = AVPK_MORE,
+	FLACREAD_DATA = AVPK_DATA,
+	FLACREAD_SEEK = AVPK_SEEK, // Use flacread_offset()
+	FLACREAD_DONE = AVPK_FIN,
+	FLACREAD_HEADER = AVPK_HEADER,
+	FLACREAD_META_BLOCK = _AVPK_META_BLOCK, // Output whole meta block body. Use flacread_meta_type() and flacread_meta_offset().
+	FLACREAD_ERROR = AVPK_ERROR,
+	FLACREAD_HEADER_FIN = 100,
 };
 
 #define _FLACR_ERR(f, e) \
@@ -80,6 +80,13 @@ static inline void flacread_open(flacread *f, ffuint64 total_size)
 	f->total_size = total_size;
 	f->seek_sample = (ffuint64)-1;
 	ffstream_realloc(&f->stream, 64*1024);
+}
+
+static inline void flacread_open2(flacread *f, struct avpk_reader_conf *conf)
+{
+	flacread_open(f, conf->total_size);
+	f->log = conf->log;
+	f->udata = conf->opaque;
 }
 
 static inline void flacread_close(flacread *f)
@@ -122,6 +129,7 @@ static int _flacr_hdr_find(flacread *f, ffstr *input, ffuint *islastblock)
 				f->error = "invalid FLAC header";
 				return -0xbad;
 			}
+			ffmem_copy(&f->streaminfo, h.ptr + 8, sizeof(struct flac_streaminfo));
 			pos += r;
 			break;
 		}
@@ -281,6 +289,10 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 	};
 	const ffuint MAX_NOFRAME = 100 * 1024*1024;
 	int r;
+
+	ffstr empty = {};
+	if ((f->fin = !input))
+		input = &empty;
 
 	for (;;) {
 		switch (f->state) {
@@ -464,12 +476,63 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 	}
 }
 
+static inline int flacread_process2(flacread *f, ffstr *input, union avpk_read_result *res)
+{
+	for (;;) {
+		int r = flacread_process(f, input, (ffstr*)&res->frame);
+		switch (r) {
+		case AVPK_HEADER:
+			res->hdr.codec = AVPKC_FLAC;
+			res->hdr.sample_bits = f->info.bits;
+			res->hdr.sample_rate = f->info.sample_rate;
+			res->hdr.channels = f->info.channels;
+			res->hdr.duration = f->info.total_samples;
+			break;
+
+		case FLACREAD_META_BLOCK:
+			switch (f->meta_type) {
+			case FLAC_TTAGS:
+				return r;
+			case FLAC_TPIC:
+				if (flac_meta_pic(*(ffstr*)&res->frame, &res->tag.value))
+					continue;
+				res->tag.id = MMTAG_PICTURE;
+				ffstr_setz(&res->tag.name, "PICTURE");
+				return AVPK_META;
+			}
+			continue;
+
+		case FLACREAD_HEADER_FIN:
+			ffstr_set(&res->frame, &f->streaminfo, sizeof(f->streaminfo));
+			res->frame.pos = ~0ULL;
+			res->frame.end_pos = ~0ULL;
+			res->frame.duration = ~0U;
+			return AVPK_DATA;
+
+		case AVPK_DATA:
+			res->frame.pos = f->frame.pos;
+			res->frame.end_pos = ~0ULL;
+			res->frame.duration = f->frame.samples;
+			break;
+
+		case AVPK_SEEK:
+			res->seek_offset = f->off;
+			break;
+
+		case AVPK_ERROR:
+		case AVPK_WARNING:
+			res->error.message = f->error;
+			res->error.offset = f->off;
+			break;
+		}
+		return r;
+	}
+}
+
 #undef _FLACR_ERR
 
 /** Get an absolute file offset to seek */
 #define flacread_offset(f)  ((f)->off)
-
-#define flacread_finish(f)  ((f)->fin = 1)
 
 static inline const struct flac_info* flacread_info(flacread *f)
 {
@@ -486,3 +549,5 @@ static inline const struct flac_info* flacread_info(flacread *f)
 #define flacread_cursample(f)  ((f)->frame.pos)
 
 #define flacread_samples(f)  ((f)->frame.samples)
+
+AVPKR_IF_INIT(avpk_flac, "flac", AVPKF_FLAC, flacread, flacread_open2, flacread_process2, flacread_seek, flacread_close);

@@ -23,7 +23,6 @@ MPEG_HDR ((XING LAME) | VBRI)
 */
 
 #pragma once
-
 #include <avpack/mpeg1-read.h>
 #include <avpack/id3v1.h>
 #include <avpack/id3v2.h>
@@ -66,6 +65,15 @@ static inline void mp3read_open(mp3read *m, ffuint64 total_size)
 	id3v2read_open(&m->id3v2);
 }
 
+static inline void mp3read_open2(mp3read *m, struct avpk_reader_conf *conf)
+{
+	mp3read_open(m, conf->total_size);
+	m->id3v1.codepage = conf->code_page;
+	m->id3v2.codepage = conf->code_page;
+	m->log = conf->log;
+	m->udata = conf->opaque;
+}
+
 static inline void mp3read_close(mp3read *m)
 {
 	id3v2read_close(&m->id3v2);
@@ -75,11 +83,11 @@ static inline void mp3read_close(mp3read *m)
 }
 
 enum MP3READ_R {
-	MP3READ_ID31 = 100,
-	MP3READ_ID32,
-	MP3READ_APETAG,
-	MP3READ_WARN,
-	MP3READ_DONE,
+	MP3READ_ID31 = AVPK_META,
+	MP3READ_ID32 = AVPK_META,
+	MP3READ_APETAG = AVPK_META,
+	MP3READ_WARN = AVPK_WARNING,
+	MP3READ_DONE = AVPK_FIN,
 };
 
 /**
@@ -240,6 +248,45 @@ static inline int mp3read_process(mp3read *m, ffstr *input, ffstr *output)
 	}
 }
 
+static inline int mp3read_process2(mp3read *m, ffstr *input, union avpk_read_result *res)
+{
+	int r = mp3read_process(m, input, (ffstr*)&res->frame);
+	switch (r) {
+	case AVPK_HEADER:
+		ffmem_zero_obj(&res->frame);
+		res->hdr.codec = AVPKC_MP3;
+		res->hdr.sample_rate = m->rd.info.sample_rate;
+		res->hdr.channels = m->rd.info.channels;
+		res->hdr.duration = m->rd.info.total_samples;
+		res->hdr.delay = m->rd.info.delay;
+		res->hdr.padding = m->rd.info.padding;
+		break;
+
+	case AVPK_META:
+		res->tag.id = m->tag;
+		res->tag.name = m->tagname;
+		res->tag.value = m->tagval;
+		break;
+
+	case AVPK_DATA:
+		res->frame.pos = m->rd.cur_sample;
+		res->frame.end_pos = ~0ULL;
+		res->frame.duration = mpeg1_samples(m->rd.prev_hdr);
+		break;
+
+	case AVPK_SEEK:
+		res->seek_offset = m->off;
+		break;
+
+	case AVPK_ERROR:
+	case AVPK_WARNING:
+		res->error.message = m->rd.error;
+		res->error.offset = m->off;
+		break;
+	}
+	return r;
+}
+
 /**
 Return enum MMTAG */
 static inline int mp3read_tag(mp3read *m, ffstr *name, ffstr *val)
@@ -249,12 +296,20 @@ static inline int mp3read_tag(mp3read *m, ffstr *name, ffstr *val)
 	return m->tag;
 }
 
-#define mp3read_error(m)  mpeg1read_error(&(m)->rd)
+static inline const char* mp3read_error(mp3read *m)
+{
+	return mpeg1read_error(&m->rd);
+}
 
 #define mp3read_info(m)  mpeg1read_info(&(m)->rd)
 
-#define mp3read_seek(m, sample)  mpeg1read_seek(&(m)->rd, sample)
+static inline void mp3read_seek(mp3read *m, ffuint64 sample)
+{
+	return mpeg1read_seek(&m->rd, sample);
+}
 
 #define mp3read_cursample(m)  mpeg1read_cursample(&(m)->rd)
 
 #define mp3read_offset(m)  (m)->off
+
+AVPKR_IF_INIT(avpk_mp3, "mp3", AVPKF_MP3, mp3read, mp3read_open2, mp3read_process2, mp3read_seek, mp3read_close);

@@ -27,7 +27,7 @@ static ffuint64 adts_bit_read64(ffuint64 val, ffuint *off, ffuint n)
 	return (val >> (64 - *off)) & ((1ULL << n) - 1);
 }
 
-static ffuint adts_bit_write32(ffuint val, ffuint *off, ffuint n)
+static inline ffuint adts_bit_write32(ffuint val, ffuint *off, ffuint n)
 {
 	*off += n;
 	return (val & ((1 << n) - 1)) << (32 - *off);
