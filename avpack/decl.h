@@ -63,7 +63,7 @@ struct avpk_info {
 	unsigned char sample_float :1;
 	unsigned char channels;
 	unsigned char codec; // enum AVPK_CODEC
-	unsigned real_bitrate;
+	unsigned audio_bitrate, real_bitrate;
 	unsigned delay, padding;
 };
 

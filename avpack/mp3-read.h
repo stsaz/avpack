@@ -258,6 +258,7 @@ static inline int mp3read_process2(mp3read *m, ffstr *input, union avpk_read_res
 		res->hdr.sample_rate = m->rd.info.sample_rate;
 		res->hdr.channels = m->rd.info.channels;
 		res->hdr.duration = m->rd.info.total_samples;
+		res->hdr.audio_bitrate = m->rd.info.bitrate;
 		res->hdr.delay = m->rd.info.delay;
 		res->hdr.padding = m->rd.info.padding;
 		break;

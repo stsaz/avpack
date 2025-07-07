@@ -759,6 +759,7 @@ static inline int mp4read_process2(mp4read *m, ffstr *input, union avpk_read_res
 		res->hdr.sample_rate = ai->format.rate;
 		res->hdr.channels = ai->format.channels;
 		res->hdr.duration = ai->total_samples;
+		res->hdr.audio_bitrate = ((int)ai->aac_bitrate > 0) ? ai->aac_bitrate : 0;
 		res->hdr.delay = ai->enc_delay;
 		res->hdr.padding = ai->end_padding;
 		m->codec_conf_pending = 1;
