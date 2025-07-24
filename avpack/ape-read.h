@@ -72,7 +72,6 @@ static inline const char* aperead_error(aperead *a)
 static inline void aperead_open(aperead *a, ffuint64 total_size)
 {
 	a->total_size = total_size;
-	a->seek_sample = (ffuint64)-1;
 }
 
 static inline void aperead_open2(aperead *a, struct avpk_reader_conf *conf)
