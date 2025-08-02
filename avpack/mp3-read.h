@@ -37,6 +37,7 @@ typedef struct mp3read {
 	ffvec buf;
 	ffstr chunk;
 	ffuint64 off, total_size;
+	ffuint options;
 
 	struct id3v1read id3v1;
 	struct id3v2read id3v2;
@@ -68,6 +69,7 @@ static inline void mp3read_open(mp3read *m, ffuint64 total_size)
 static inline void mp3read_open2(mp3read *m, struct avpk_reader_conf *conf)
 {
 	mp3read_open(m, conf->total_size);
+	m->options = conf->flags;
 	m->id3v1.codepage = conf->code_page;
 	m->id3v2.codepage = conf->code_page;
 	m->log = conf->log;
@@ -102,7 +104,7 @@ Return enum MPEG1READ_R or enum MP3READ_R */
 static inline int mp3read_process(mp3read *m, ffstr *input, ffstr *output)
 {
 	enum {
-		R_ID3V2, R_GATHER,
+		R_INIT, R_ID3V2, R_GATHER,
 		R_FTR_SEEK, R_ID3V1, R_APETAG_FTR, R_APETAG,
 		R_HDR_SEEK, R_HDR, R_FRAMES,
 	};
@@ -110,6 +112,16 @@ static inline int mp3read_process(mp3read *m, ffstr *input, ffstr *output)
 
 	for (;;) {
 		switch (m->state) {
+		case R_INIT:
+			if (!input->len)
+				return MPEG1READ_MORE;
+			if (input->ptr[0] != 'I') {
+				m->state = R_HDR;
+				continue;
+			}
+			m->state = R_ID3V2;
+			// fallthrough
+
 		case R_ID3V2: {
 			ffsize len = input->len;
 			r = id3v2read_process(&m->id3v2, input, &m->tagname, &m->tagval);
@@ -136,6 +148,11 @@ static inline int mp3read_process(mp3read *m, ffstr *input, ffstr *output)
 			// fallthrough
 
 		case R_FTR_SEEK:
+			if (m->options & AVPKR_F_NO_SEEK) {
+				m->state = R_HDR;
+				continue;
+			}
+
 			if (m->data_off + sizeof(struct apetaghdr) + sizeof(struct id3v1) > m->total_size) {
 				m->state = R_HDR;
 				if (m->total_size != 0 && m->data_off == 0)

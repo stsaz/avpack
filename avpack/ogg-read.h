@@ -86,7 +86,7 @@ static inline void oggread_open(oggread *o, ffuint64 total_size)
 
 static inline void oggread_open2(oggread *o, struct avpk_reader_conf *conf)
 {
-	oggread_open(o, conf->total_size);
+	oggread_open(o, !(conf->flags & AVPKR_F_NO_SEEK) ? conf->total_size : 0);
 	o->log = conf->log;
 	o->udata = conf->opaque;
 }

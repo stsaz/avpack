@@ -105,7 +105,7 @@ static inline void mpcread_open(mpcread *m, ffuint64 total_size)
 
 static inline void mpcread_open2(mpcread *m, struct avpk_reader_conf *conf)
 {
-	mpcread_open(m, conf->total_size);
+	mpcread_open(m, !(conf->flags & AVPKR_F_NO_SEEK) ? conf->total_size : 0);
 	m->log = conf->log;
 	m->udata = conf->opaque;
 }

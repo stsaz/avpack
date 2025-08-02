@@ -76,7 +76,7 @@ static inline void aperead_open(aperead *a, ffuint64 total_size)
 
 static inline void aperead_open2(aperead *a, struct avpk_reader_conf *conf)
 {
-	aperead_open(a, conf->total_size);
+	aperead_open(a, !(conf->flags & AVPKR_F_NO_SEEK) ? conf->total_size : 0);
 }
 
 static inline void aperead_close(aperead *a)

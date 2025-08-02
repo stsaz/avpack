@@ -100,7 +100,7 @@ static inline void wvread_open(wvread *w, ffuint64 total_size)
 
 static inline void wvread_open2(wvread *w, struct avpk_reader_conf *conf)
 {
-	wvread_open(w, conf->total_size);
+	wvread_open(w, !(conf->flags & AVPKR_F_NO_SEEK) ? conf->total_size : 0);
 	w->id3v1.codepage = conf->code_page;
 }
 

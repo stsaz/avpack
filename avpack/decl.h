@@ -107,6 +107,7 @@ struct avpk_reader_conf {
 
 enum AVPKR_F {
 	AVPKR_F_AAC_FRAMES = 1, // return the whole ADTS frames (with header)
+	AVPKR_F_NO_SEEK = 2, // Disable auto seek requests even if `total_size` is set
 };
 
 struct avpkr_if {

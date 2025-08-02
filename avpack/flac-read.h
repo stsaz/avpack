@@ -137,9 +137,6 @@ static int _flacr_hdr_find(flacread *f, ffstr *input, ffuint *islastblock)
 		ffstream_consume(&f->stream, chunk.len - (FLAC_HDR_MINSIZE-1));
 	}
 
-	if (f->total_size != 0 && f->info.total_samples != 0)
-		f->info.bitrate = f->total_size * 8 * f->info.sample_rate / f->info.total_samples;
-
 	return pos;
 }
 
