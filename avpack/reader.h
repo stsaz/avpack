@@ -32,6 +32,7 @@ struct avpk_reader {
 	ffstr data;
 	ffuint64 total_size;
 	unsigned state;
+	unsigned ctx_alloc;
 	vorbistagread vtag;
 };
 
@@ -41,7 +42,10 @@ static inline int avpk_open(avpk_reader *a, const struct avpkr_if *rif, struct a
 		return 1;
 
 	a->ifa = *rif;
-	a->ctx = ffmem_zalloc(a->ifa.context_size);
+	if (!a->ctx) {
+		a->ctx = ffmem_zalloc(a->ifa.context_size);
+		a->ctx_alloc = 1;
+	}
 	a->ifa.open(a->ctx, c);
 	a->total_size = c->total_size;
 	return 0;
@@ -51,7 +55,8 @@ static inline void avpk_close(avpk_reader *a)
 {
 	if (a->ifa.close)
 		a->ifa.close(a->ctx);
-	ffmem_free(a->ctx);
+	if (a->ctx_alloc)
+		ffmem_free(a->ctx);
 }
 
 static inline int avpk_read(avpk_reader *a, ffstr *in, union avpk_read_result *res)
