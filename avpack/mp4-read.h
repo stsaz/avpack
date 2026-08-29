@@ -247,17 +247,17 @@ static inline void mp4read_close(mp4read *m)
 Return 0 on success
   -1 if need more data, i.e. sizeof(struct mp4box64)
   >0: enum MP4READ_E error */
-static inline int _mp4_box_parse(mp4read *m, struct mp4_box *parent, struct mp4_box *box, ffstr *data)
+static inline int _mp4_box_parse(mp4read *m, struct mp4_box *parent, struct mp4_box *box, ffstr data)
 {
-	const struct mp4box *b = (struct mp4box*)data->ptr;
-	if (sizeof(*b) > data->len)
+	const struct mp4box *b = (struct mp4box*)data.ptr;
+	if (sizeof(*b) > data.len)
 		return -1;
 
 	ffuint64 sz = ffint_be_cpu32_ptr(b->size);
 	ffuint box_szof = sizeof(struct mp4box);
 	if (sz == 1) {
-		const struct mp4box64 *b64 = (struct mp4box64*)data->ptr;
-		if (sizeof(*b64) > data->len)
+		const struct mp4box64 *b64 = (struct mp4box64*)data.ptr;
+		if (sizeof(*b64) > data.len)
 			return -1;
 		sz = ffint_be_cpu64_ptr(b64->largesize);
 		box_szof = sizeof(struct mp4box64);
@@ -352,8 +352,11 @@ static inline int _mp4_box_process(mp4read *m, ffstr sbox)
 	struct mp4_box *box = &m->boxes[m->ictx];
 	rd = MP4_GET_MINSIZE(box->type);
 
-	if (box->type & MP4_F_FULLBOX)
+	ffstr fb_data = {};
+	if (box->type & MP4_F_FULLBOX) {
+		fb_data = ffstr_substr(&sbox, box->osize - box->size);
 		box->size -= 4;
+	}
 	ffstr_shift(&sbox, box->osize - box->size);
 
 	switch (MP4_GET_TYPE(box->type)) {
@@ -366,15 +369,33 @@ static inline int _mp4_box_process(mp4read *m, ffstr sbox)
 		ffmem_zero_obj(m->curtrack);
 		break;
 
+	case BOX_ELST: {
+		ffuint64 duration, delay;
+		r = mp4_elst_read(fb_data.ptr, fb_data.len, &duration, &delay);
+		if (r <= 0)
+			return _MP4R_ERR(m, MP4READ_EDATA);
+		if (delay <= 0xffffffff)
+			m->curtrack->audio.enc_delay = delay;
+		rd = r - sizeof(struct mp4_fullbox);
+		break;
+	}
+
 	case BOX_MDHD: {
-		const struct mp4_mdhd0 *mdhd = (struct mp4_mdhd0*)sbox.ptr;
-		m->curtrack->audio.format.rate = ffint_be_cpu32_ptr(mdhd->timescale);
+		ffuint rate;
+		ffuint64 duration;
+		r = mp4_mdhd_read(fb_data.ptr, fb_data.len, &rate, &duration);
+		if (r <= 0)
+			return _MP4R_ERR(m, MP4READ_EDATA);
+		m->curtrack->audio.format.rate = rate;
+		rd = r - sizeof(struct mp4_fullbox);
 		break;
 	}
 
 	case BOX_STSD_ALAC:
 	case BOX_STSD_MP4A:
-		rd = mp4_afmt_read(sbox, &m->curtrack->audio.format);
+		rd = mp4_afmt_read(sbox.ptr, sbox.len, &m->curtrack->audio.format);
+		if (rd <= 0)
+			return _MP4R_ERR(m, MP4READ_EDATA);
 		m->curtrack->audio.type = 1;
 		break;
 
@@ -571,7 +592,7 @@ static inline int mp4read_process(mp4read *m, ffstr *input, ffstr *output)
 		case R_BOX_PARSE: {
 			struct mp4_box *parent = &m->boxes[m->ictx];
 			box = &m->boxes[m->ictx + 1];
-			r = _mp4_box_parse(m, parent, box, &m->chunk);
+			r = _mp4_box_parse(m, parent, box, m->chunk);
 			if (r == -1) {
 				m->state = R_GATHER,  m->nextstate = R_BOX_PARSE,  m->gather_size = sizeof(struct mp4box64);
 				continue;

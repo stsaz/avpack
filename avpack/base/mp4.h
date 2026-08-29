@@ -6,7 +6,6 @@
 mp4_hdlr_write
 mp4_box_find
 mp4_box_write
-mp4_fbox_write
 mp4_tkhd_write
 mp4_mvhd_write mp4_mdhd_write
 mp4_stsd_write
@@ -67,35 +66,13 @@ struct mp4_fullbox {
 	ffbyte flags[3];
 };
 
-struct mp4_hdlr {
-	ffbyte unused[4];
-	ffbyte type[4]; //"soun"
-	ffbyte unused2[12];
-};
-
-static inline int mp4_hdlr_write(void *dst)
-{
-	struct mp4_hdlr *hdlr = (struct mp4_hdlr*)dst;
-	ffmem_zero_obj(hdlr);
-	ffmem_copy(hdlr->type, "soun", 4);
-	return sizeof(struct mp4_hdlr);
-}
-
-struct mp4_smhd {
-	ffbyte unused[4];
-};
-
-struct mp4_dref {
-	ffbyte cnt[4];
-};
-
-
 enum BOX {
 	BOX_ANY,
 	BOX_FTYP,
 	BOX_MOOV,
 	BOX_MVHD,
 	BOX_TRAK,
+	BOX_ELST,
 	BOX_MDHD,
 	BOX_HDLR,
 	BOX_DREF,
@@ -176,13 +153,6 @@ static inline int mp4_box_write(const char *type, char *dst, ffsize len)
 	return len + sizeof(struct mp4box);
 }
 
-/**
-Return total box size. */
-static inline int mp4_fbox_write(const char *type, char *dst, ffsize len)
-{
-	len += sizeof(struct mp4_fullbox);
-	return mp4_box_write(type, dst, len);
-}
 
 
 struct mp4_ftyp {
@@ -193,39 +163,16 @@ struct mp4_ftyp {
 	//...
 };
 
-
-struct mp4_tkhd0 {
-	//flags = 0x07
-	ffbyte creat_time[4];
-	ffbyte mod_time[4];
-	ffbyte id[4];
-	ffbyte res[4];
-	ffbyte duration[4];
-
-	ffbyte unused[4 * 15];
-};
-struct mp4_tkhd1 {
-	//flags = 0x07
-	ffbyte creat_time[8];
-	ffbyte mod_time[8];
-	ffbyte id[4];
-	ffbyte res[4];
-	ffbyte duration[8];
-
-	ffbyte unused[4 * 15];
-};
-
-static inline int mp4_tkhd_write(char *dst, ffuint id, ffuint64 total_samples)
+static inline int mp4_ftyp_write(char *dst, ffsize cap)
 {
-	(void)id;
-	struct mp4_fullbox *fbox = (struct mp4_fullbox*)dst;
-	fbox->version = 1;
-	fbox->flags[2] = 0x07;
-
-	struct mp4_tkhd1 *tkhd = (struct mp4_tkhd1*)(fbox + 1);
-	*(ffuint*)tkhd->id = ffint_be_cpu32(1);
-	*(ffuint64*)tkhd->duration = ffint_be_cpu64(total_samples);
-	return sizeof(struct mp4_tkhd1);
+	static const char ftyp_aac[] = {
+		"M4A " "\0\0\0\0" "M4A " "isom" "iso2" "\0\0\0\0"
+	};
+	ffuint n = sizeof(ftyp_aac) - 1;
+	if (n > cap)
+		return (dst) ? 0 : n;
+	ffmem_copy(dst, ftyp_aac, n);
+	return n;
 }
 
 
@@ -234,25 +181,177 @@ struct mp4_mvhd0 {
 	ffbyte mod_time[4];
 	ffbyte timescale[4];
 	ffbyte duration[4];
-	ffbyte unused[80];
 };
 struct mp4_mvhd1 {
 	ffbyte creat_time[8];
 	ffbyte mod_time[8];
 	ffbyte timescale[4];
 	ffbyte duration[8];
-	ffbyte unused[80];
+};
+struct mp4_mvhd_ext {
+	ffbyte rate[4]; // =0x00010000
+	ffbyte volume[2]; // =0x0100
+	ffbyte res[2+2*4];
+	ffbyte matrix[9*4]; // ={0x00010000,0,0,0,0x00010000,0,0,0,0x40000000}
+	ffbyte res2[6*4];
+	ffbyte next_track_id[4]; // max track ID for this file +1
 };
 
-static inline int mp4_mvhd_write(char *dst, ffuint rate, ffuint64 total_samples)
+static inline int mp4_mvhd_write(char *dst, ffsize cap, ffuint timescale, ffuint64 duration)
 {
-	struct mp4_fullbox *fbox = (struct mp4_fullbox*)dst;
-	fbox->version = 1;
+	ffuint n = sizeof(struct mp4_fullbox) + sizeof(struct mp4_mvhd1) + sizeof(struct mp4_mvhd_ext);
+	if (n > cap)
+		return (dst) ? 0 : n;
 
-	struct mp4_mvhd1 *mvhd = (struct mp4_mvhd1*)(fbox + 1);
-	*(ffuint*)mvhd->timescale = ffint_be_cpu32(rate);
-	*(ffuint64*)mvhd->duration = ffint_be_cpu64(total_samples);
-	return sizeof(struct mp4_mvhd1);
+	ffmem_zero(dst, n);
+	struct mp4_fullbox *fbox = (struct mp4_fullbox*)dst;
+	struct mp4_mvhd_ext *ext;
+	if (duration > 0xffffffff) {
+		fbox->version = 1;
+		struct mp4_mvhd1 *mvhd = (struct mp4_mvhd1*)(fbox + 1);
+		*(int*)mvhd->timescale = ffint_be_cpu32(timescale);
+		*(ffint64*)mvhd->duration = ffint_be_cpu64(duration);
+		ext = (struct mp4_mvhd_ext*)(mvhd + 1);
+
+	} else {
+		struct mp4_mvhd0 *mvhd = (struct mp4_mvhd0*)(fbox + 1);
+		*(int*)mvhd->timescale = ffint_be_cpu32(timescale);
+		*(int*)mvhd->duration = ffint_be_cpu32(duration);
+		ext = (struct mp4_mvhd_ext*)(mvhd + 1);
+	}
+
+	*(int*)ext->rate = ffint_be_cpu32(0x00010000);
+	*(short*)ext->volume = ffint_be_cpu16(0x0100);
+	*(int*)ext->matrix = ffint_be_cpu32(0x00010000);
+	*(int*)(ext->matrix + 4*4) = ffint_be_cpu32(0x00010000);
+	*(int*)(ext->matrix + 8*4) = ffint_be_cpu32(0x40000000);
+	*(int*)ext->next_track_id = ffint_be_cpu32(2);
+	return (char*)(ext + 1) - dst;
+}
+
+
+struct mp4_tkhd0 {
+	ffbyte creat_time[4];
+	ffbyte mod_time[4];
+	ffbyte id[4];
+	ffbyte res[4];
+	ffbyte duration[4];
+};
+struct mp4_tkhd1 {
+	ffbyte creat_time[8];
+	ffbyte mod_time[8];
+	ffbyte id[4];
+	ffbyte res[4];
+	ffbyte duration[8];
+};
+struct mp4_tkhd_ext {
+	ffbyte res[2*4+2+2];
+	ffbyte volume[2]; // =0x0100 for audio
+	ffbyte res2[2];
+	ffbyte matrix[9*4]; // ={0x00010000,0,0,0,0x00010000,0,0,0,0x40000000}
+	ffbyte unused[2*4];
+};
+
+static inline int mp4_tkhd_write(char *dst, ffsize cap, ffuint id, ffuint64 duration)
+{
+	ffuint n = sizeof(struct mp4_fullbox) + sizeof(struct mp4_tkhd1) + sizeof(struct mp4_tkhd_ext);
+	if (n > cap)
+		return (dst) ? 0 : n;
+
+	ffmem_zero(dst, n);
+	struct mp4_fullbox *fbox = (struct mp4_fullbox*)dst;
+	fbox->flags[2] = 1 | 2; // bit0: track enabled
+	struct mp4_tkhd_ext *ext;
+	if (duration > 0xffffffff) {
+		fbox->version = 1;
+		struct mp4_tkhd1 *tkhd = (struct mp4_tkhd1*)(fbox + 1);
+		*(ffuint*)tkhd->id = ffint_be_cpu32(id);
+		*(ffuint64*)tkhd->duration = ffint_be_cpu64(duration);
+		ext = (struct mp4_tkhd_ext*)(tkhd + 1);
+
+	} else {
+		struct mp4_tkhd0 *tkhd = (struct mp4_tkhd0*)(fbox + 1);
+		*(ffuint*)tkhd->id = ffint_be_cpu32(id);
+		*(ffuint*)tkhd->duration = ffint_be_cpu32(duration);
+		ext = (struct mp4_tkhd_ext*)(tkhd + 1);
+	}
+
+	*(short*)ext->volume = ffint_be_cpu16(0x0100);
+	*(int*)ext->matrix = ffint_be_cpu32(0x00010000);
+	*(int*)(ext->matrix + 4*4) = ffint_be_cpu32(0x00010000);
+	*(int*)(ext->matrix + 8*4) = ffint_be_cpu32(0x40000000);
+	return (char*)(ext + 1) - dst;
+}
+
+
+struct mp4_elst {
+	ffbyte count[4];
+};
+struct mp4_elst_ent0 {
+	ffbyte segment_duration[4];
+	ffbyte media_time[4];
+	ffbyte media_rate_integer[2];
+	ffbyte unused[2];
+};
+struct mp4_elst_ent1 {
+	ffbyte segment_duration[8];
+	ffbyte media_time[8];
+	ffbyte media_rate_integer[2];
+	ffbyte unused[2];
+};
+
+static inline int mp4_elst_read(const char *data, ffsize len, ffuint64 *duration, ffuint64 *enc_delay)
+{
+	if (4+4 > len)
+		return 0;
+	const char *end = data + len;
+	const struct mp4_fullbox *fbox = (struct mp4_fullbox*)data;
+	ffuint n = ffint_be_cpu32_ptr(data + 4);
+	if (!n)
+		return 4+4;
+
+	if (fbox->version == 1) {
+		const struct mp4_elst_ent1 *ee = (struct mp4_elst_ent1*)(data + 8);
+		if ((char*)(ee + 1) > end)
+			return 0;
+		*duration = ffint_be_cpu64_ptr(ee->segment_duration);
+		*enc_delay = ffint_be_cpu64_ptr(ee->media_time);
+		return (char*)(ee + 1) - data;
+	}
+
+	const struct mp4_elst_ent0 *ee = (struct mp4_elst_ent0*)(data + 8);
+	if ((char*)(ee + 1) > end)
+		return 0;
+	*duration = ffint_be_cpu32_ptr(ee->segment_duration);
+	*enc_delay = ffint_be_cpu32_ptr(ee->media_time);
+	return (char*)(ee + 1) - data;
+}
+
+static inline int mp4_elst_write(char *dst, ffsize cap, ffuint64 duration_mvhd, ffuint enc_delay_mdhd)
+{
+	ffuint n = sizeof(struct mp4_fullbox) + sizeof(struct mp4_elst) + sizeof(struct mp4_elst_ent1);
+	if (n > cap)
+		return (dst) ? 0 : n;
+
+	ffmem_zero(dst, n);
+	struct mp4_fullbox *fbox = (struct mp4_fullbox*)dst;
+	struct mp4_elst *elst = (struct mp4_elst*)(fbox + 1);
+	*(int*)elst->count = ffint_be_cpu32(1);
+
+	if (duration_mvhd > 0xffffffff) {
+		fbox->version = 1;
+		struct mp4_elst_ent1 *ee = (struct mp4_elst_ent1*)(elst + 1);
+		*(ffint64*)ee->segment_duration = ffint_be_cpu64(duration_mvhd);
+		*(ffint64*)ee->media_time = ffint_be_cpu64(enc_delay_mdhd);
+		*(short*)ee->media_rate_integer = ffint_be_cpu16(1);
+		return (char*)(ee + 1) - dst;
+	}
+
+	struct mp4_elst_ent0 *ee = (struct mp4_elst_ent0*)(elst + 1);
+	*(int*)ee->segment_duration = ffint_be_cpu32(duration_mvhd);
+	*(int*)ee->media_time = ffint_be_cpu32(enc_delay_mdhd);
+	*(short*)ee->media_rate_integer = ffint_be_cpu16(1);
+	return (char*)(ee + 1) - dst;
 }
 
 
@@ -263,25 +362,97 @@ struct mp4_mdhd0 {
 	ffbyte duration[4];
 	ffbyte unused[4];
 };
+struct mp4_mdhd1 {
+	ffbyte creat_time[8];
+	ffbyte mod_time[8];
+	ffbyte timescale[4];
+	ffbyte duration[8];
+	ffbyte unused[4];
+};
 
-static inline int mp4_mdhd_write(char *dst, ffuint rate, ffuint64 total_samples)
+static inline int mp4_mdhd_write(char *dst, ffsize cap, ffuint timescale, ffuint64 duration)
 {
+	ffuint n = sizeof(struct mp4_fullbox) + sizeof(struct mp4_mdhd1);
+	if (n > cap)
+		return (dst) ? 0 : n;
+
 	struct mp4_fullbox *fbox = (struct mp4_fullbox*)dst;
-	fbox->version = 0;
+	ffmem_zero(fbox + 1, sizeof(struct mp4_mdhd1));
+	if (duration > 0xffffffff) {
+		fbox->version = 1;
+		struct mp4_mdhd1 *mdhd = (struct mp4_mdhd1*)(fbox + 1);
+		*(int*)mdhd->timescale = ffint_be_cpu32(timescale);
+		*(ffint64*)mdhd->duration = ffint_be_cpu64(duration);
+		return (char*)(mdhd + 1) - dst;
+	}
 
 	struct mp4_mdhd0 *mdhd = (struct mp4_mdhd0*)(fbox + 1);
-	*(ffuint*)mdhd->timescale = ffint_be_cpu32(rate);
-	*(ffuint*)mdhd->duration = ffint_be_cpu32(total_samples);
-	return sizeof(struct mp4_mdhd0);
+	*(int*)mdhd->timescale = ffint_be_cpu32(timescale);
+	*(int*)mdhd->duration = ffint_be_cpu32(duration);
+	return (char*)(mdhd + 1) - dst;
 }
 
+static inline int mp4_mdhd_read(const char *data, ffsize len, ffuint *timescale, ffuint64 *duration)
+{
+	if (4 > len)
+		return 0;
+	const char *end = data + len;
+	const struct mp4_fullbox *fbox = (struct mp4_fullbox*)data;
+
+	if (fbox->version == 1) {
+		const struct mp4_mdhd1 *mdhd = (struct mp4_mdhd1*)(data + 4);
+		if ((char*)(mdhd + 1) > end)
+			return 0;
+		*timescale = ffint_be_cpu32_ptr(mdhd->timescale);
+		*duration = ffint_be_cpu64_ptr(mdhd->duration);
+		return (char*)(mdhd + 1) - data;
+	}
+
+	const struct mp4_mdhd0 *mdhd = (struct mp4_mdhd0*)(data + 4);
+	if ((char*)(mdhd + 1) > end)
+		return 0;
+	*timescale = ffint_be_cpu32_ptr(mdhd->timescale);
+	*duration = ffint_be_cpu32_ptr(mdhd->duration);
+	return (char*)(mdhd + 1) - data;
+}
+
+
+struct mp4_hdlr {
+	ffbyte unused[4];
+	ffbyte type[4]; // audio:"soun"
+	ffbyte res[3*4];
+	ffbyte name[1];
+};
+
+static inline int mp4_hdlr_write(void *dst, ffsize cap)
+{
+	if (sizeof(struct mp4_hdlr) > cap)
+		return (dst) ? 0 : sizeof(struct mp4_hdlr);
+
+	struct mp4_hdlr *hdlr = (struct mp4_hdlr*)dst;
+	ffmem_zero_obj(hdlr);
+	*(int*)hdlr->type = *(int*)"soun";
+	return sizeof(*hdlr);
+}
+
+
+struct mp4_smhd {
+	ffbyte unused[4];
+};
+
+struct mp4_dref {
+	ffbyte cnt[4];
+};
 
 struct mp4_stsd {
 	ffbyte cnt[4];
 };
 
-static inline int mp4_stsd_write(char *dst)
+static inline int mp4_stsd_write(char *dst, ffsize cap)
 {
+	if (sizeof(struct mp4_stsd) > cap)
+		return 0;
+
 	struct mp4_stsd *stsd = (struct mp4_stsd*)dst;
 	*(ffuint*)stsd->cnt = ffint_be_cpu32(1);
 	return sizeof(struct mp4_stsd);
@@ -290,12 +461,12 @@ static inline int mp4_stsd_write(char *dst)
 
 struct mp4_afmt {
 	ffbyte res[6];
-	ffbyte unused[2];
+	ffbyte dref_index[2]; // =1
 
 	ffbyte ver[2];
 	ffbyte res2[6];
 	ffbyte channels[2];
-	ffbyte bits[2];
+	ffbyte sample_size[2];
 	ffbyte unused2[4];
 	ffbyte rate[2];
 	ffbyte rate_res[2];
@@ -321,10 +492,13 @@ struct mp4_alac {
 };
 
 /** Read 'stsd.mp4a' or 'stsd.alac' data */
-static inline int mp4_afmt_read(ffstr data, struct mp4_aformat *f)
+static inline int mp4_afmt_read(const char *data, ffsize len, struct mp4_aformat *f)
 {
-	const struct mp4_afmt *afmt = (struct mp4_afmt*)data.ptr;
-	f->bits = ffint_be_cpu16_ptr(afmt->bits);
+	const struct mp4_afmt *afmt = (struct mp4_afmt*)data;
+	ffuint n = sizeof(*afmt);
+	if (n > len)
+		return 0;
+	f->bits = ffint_be_cpu16_ptr(afmt->sample_size);
 	f->channels = ffint_be_cpu16_ptr(afmt->channels);
 
 	if (f->rate == 0)
@@ -332,21 +506,27 @@ static inline int mp4_afmt_read(ffstr data, struct mp4_aformat *f)
 
 	ffuint ver = ffint_be_cpu16_ptr(afmt->ver);
 	if (ver == 1) {
-		if (sizeof(struct mp4_afmt) + sizeof(struct mp4_afmt_exv1) <= data.len)
-			return sizeof(struct mp4_afmt) + sizeof(struct mp4_afmt_exv1);
+		n += sizeof(struct mp4_afmt_exv1);
+		if (n > len)
+			return 0;
 	} else if (ver == 2) {
-		if (sizeof(struct mp4_afmt) + sizeof(struct mp4_afmt_exv2) <= data.len)
-			return sizeof(struct mp4_afmt) + sizeof(struct mp4_afmt_exv2);
+		n += sizeof(struct mp4_afmt_exv2);
+		if (n > len)
+			return 0;
 	}
-	return sizeof(struct mp4_afmt);
+	return n;
 }
 
 /** Write 'stsd.mp4a' data */
-static inline ffuint mp4_afmt_write(void *dst, const struct mp4_aformat *f)
+static inline ffuint mp4_afmt_write(void *dst, ffsize cap, const struct mp4_aformat *f)
 {
+	if (sizeof(struct mp4_afmt) > cap)
+		return (dst) ? 0 : sizeof(struct mp4_afmt);
+
 	struct mp4_afmt *afmt = (struct mp4_afmt*)dst;
-	*(ffushort*)afmt->bits = ffint_be_cpu16(f->bits);
+	*(ffushort*)afmt->dref_index = ffint_be_cpu16(1);
 	*(ffushort*)afmt->channels = ffint_be_cpu16(f->channels);
+	*(ffushort*)afmt->sample_size = ffint_be_cpu16(f->bits);
 	if (f->rate <= 0xffff)
 		*(ffushort*)afmt->rate = ffint_be_cpu16(f->rate);
 	return sizeof(struct mp4_afmt);
@@ -473,13 +653,15 @@ static inline int mp4_esds_read(const char *data, ffuint len, struct mp4_acodec 
 	return r;
 }
 
-static inline int mp4_esds_write(char *dst, const struct mp4_acodec *ac)
+static inline int mp4_esds_write(char *dst, ffsize cap, const struct mp4_acodec *ac)
 {
 	char *d = dst;
 	ffuint total = sizeof(struct mp4_esds)
 		+ sizeof(struct mp4_esds_tag) + sizeof(struct mp4_esds_dec)
 		+ sizeof(struct mp4_esds_tag) + ac->conflen
 		+ sizeof(struct mp4_esds_tag) + 1;
+	if (total > cap)
+		return (dst) ? 0 : total;
 
 	d += mp4_esds_block_write(d, MP4_ESDS_TAG, total);
 	ffmem_zero(d, sizeof(struct mp4_esds));
@@ -994,13 +1176,17 @@ static inline int mp4_itunes_smpb_write(char *data, ffuint64 total_samples, ffui
 All boxes are used by ffmp4_write() automatically, unless explicitly marked as (R)ead-only.
 'moov' is written after 'mdat' when total samples number isn't known in advance.
 
+Box Name               Purpose
+======================================
 ftyp
 moov
  mvhd
  trak
   tkhd
+  edts
+   elst                Encoder delay
   mdia
-   mdhd
+   mdhd                Sample rate
    hdlr
    minf
     smhd
@@ -1009,32 +1195,33 @@ moov
       url
     stbl
      stsd
-      mp4a
-       esds
+      mp4a             Audio format
+       esds            Codec config
        wave(R)
         esds
-      alac(R)
-       alac
-      avc1(R)
-     stts
-     stsc
-     stsz
-     stco | co64(R)
+      alac(R)          Audio format
+       alac            Codec config
+      avc1(R)          Video format
+     stts              Audio sample position for each seek point
+     stsc              Data chunk index for each seek point
+     stsz              Seek points
+     stco | co64(R)    File offsets of the data chunks
  udta
   meta
    ilst
     [tag_name]
-     data
+     data              Tag
     ----
      mean
      name
-     data
+     data              Apple-specific encoder delay and padding
 mdat
 */
 
 static const struct mp4_bbox
 	mp4_ctx_moov[],
 	mp4_ctx_trak[],
+	mp4_ctx_edts[],
 	mp4_ctx_mdia[],
 	mp4_ctx_minf[],
 	mp4_ctx_dinf[],
@@ -1067,11 +1254,15 @@ static const struct mp4_bbox mp4_ctx_moov[] = {
 
 static const struct mp4_bbox mp4_ctx_trak[] = {
 	{"tkhd", BOX_TKHD | MP4_F_FULLBOX | MP4_F_REQ | MP4_MINSIZE(sizeof(struct mp4_tkhd0)), NULL},
+	{"edts", BOX_ANY, mp4_ctx_edts },
 	{"mdia", BOX_ANY | MP4_F_LAST, mp4_ctx_mdia},
 };
+static const struct mp4_bbox mp4_ctx_edts[] = {
+	{"elst", BOX_ELST | MP4_F_FULLBOX | MP4_F_WHOLE | MP4_F_LAST, NULL},
+};
 static const struct mp4_bbox mp4_ctx_mdia[] = {
-	{"hdlr", BOX_HDLR | MP4_F_FULLBOX | MP4_F_REQ | MP4_MINSIZE(sizeof(struct mp4_hdlr)), NULL},
 	{"mdhd", BOX_MDHD | MP4_F_FULLBOX | MP4_F_REQ | MP4_MINSIZE(sizeof(struct mp4_mdhd0)), NULL},
+	{"hdlr", BOX_HDLR | MP4_F_FULLBOX | MP4_F_REQ | MP4_MINSIZE(8), NULL},
 	{"minf", BOX_ANY | MP4_F_LAST, mp4_ctx_minf},
 };
 static const struct mp4_bbox mp4_ctx_minf[] = {

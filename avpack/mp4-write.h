@@ -144,6 +144,7 @@ static inline int mp4write_create_aac(mp4write *m, struct mp4_info *info)
 	m->info.enc_delay = info->enc_delay;
 	m->info.bitrate = info->bitrate;
 	m->fmt = info->fmt;
+	m->fmt.bits = 16;
 	m->chunk_frames = (m->fmt.rate / 2) / m->info.frame_samples;
 	m->stream = (m->info.total_samples == 0);
 	if (!m->stream) {
@@ -248,6 +249,24 @@ static inline ffuint _mp4_boxsize(mp4write *m, const struct mp4_bbox *b)
 	ffuint t = MP4_GET_TYPE(b->flags), n = MP4_GET_MINSIZE(b->flags);
 
 	switch (t) {
+	case BOX_FTYP:
+		n = mp4_ftyp_write(NULL, 0);  break;
+
+	case BOX_MVHD:
+		n = mp4_mvhd_write(NULL, 0, 0, 0);  break;
+
+	case BOX_TKHD:
+		n = mp4_tkhd_write(NULL, 0, 0, 0);  break;
+
+	case BOX_HDLR:
+		n = mp4_hdlr_write(NULL, 0);  break;
+
+	case BOX_MDHD:
+		n = mp4_mdhd_write(NULL, 0, 0, 0);  break;
+
+	case BOX_ELST:
+		n = mp4_elst_write(NULL, 0, 0, 0);  break;
+
 	case BOX_STSC:
 	case BOX_STTS:
 		n = 64;
@@ -305,7 +324,7 @@ static inline ffuint _mp4_boxsize(mp4write *m, const struct mp4_bbox *b)
 Return -1 if box should be skipped */
 static inline int _mp4_boxdata(mp4write *m, const struct mp4_bbox *b)
 {
-	ffuint t = MP4_GET_TYPE(b->flags), n, boxoff = m->buf.len, box_data_off;
+	ffuint t = MP4_GET_TYPE(b->flags), n, boxoff = m->buf.len, box_data_off, cap = m->buf.cap - m->buf.len;
 	struct mp4_fullbox *fbox = NULL;
 	void *data = ffslice_end(&m->buf, 1) + sizeof(struct mp4box);
 
@@ -325,14 +344,8 @@ static inline int _mp4_boxdata(mp4write *m, const struct mp4_bbox *b)
 		ffmem_zero(data, n);
 
 	switch (t) {
-	case BOX_FTYP: {
-		static const char ftyp_aac[24] = {
-			"M4A " "\0\0\0\0" "M4A " "mp42" "isom" "\0\0\0\0"
-		};
-		n = sizeof(ftyp_aac);
-		ffmem_copy(data, ftyp_aac, n);
-		break;
-	}
+	case BOX_FTYP:
+		n = mp4_ftyp_write(data, cap);  break;
 
 	case BOX_MDAT:
 		m->mdat_off = boxoff;
@@ -340,16 +353,17 @@ static inline int _mp4_boxdata(mp4write *m, const struct mp4_bbox *b)
 			m->state = 10 /*W_MDAT_HDR*/;
 		break;
 
-	case BOX_TKHD:
-		n = mp4_tkhd_write((void*)fbox, 1, m->info.total_samples);
-		break;
-
 	case BOX_MVHD:
-		n = mp4_mvhd_write((void*)fbox, m->fmt.rate, m->info.total_samples);
-		break;
+		return mp4_mvhd_write((void*)fbox, cap, 1000 /*msec*/, m->info.total_samples * 1000 / m->fmt.rate);
+
+	case BOX_TKHD:
+		return mp4_tkhd_write((void*)fbox, cap, 1 /*ID*/, m->info.total_samples * 1000 / m->fmt.rate);
 
 	case BOX_MDHD:
-		n = mp4_mdhd_write((void*)fbox, m->fmt.rate, m->info.total_samples);
+		return mp4_mdhd_write((void*)fbox, cap, m->fmt.rate, m->info.total_samples);
+
+	case BOX_HDLR:
+		n = mp4_hdlr_write(data, cap);
 		break;
 
 	case BOX_DREF: {
@@ -358,21 +372,19 @@ static inline int _mp4_boxdata(mp4write *m, const struct mp4_bbox *b)
 		break;
 	}
 
+	case BOX_ELST:
+		return mp4_elst_write((void*)fbox, cap, m->info.total_samples * 1000 / m->fmt.rate, m->info.enc_delay);
+
 	case BOX_DREF_URL:
 		ffmem_copy(fbox->flags, "\x00\x00\x01", 3); //"mdat" is in the same file as "moov"
 		break;
 
 	case BOX_STSD:
-		n = mp4_stsd_write(data);
+		n = mp4_stsd_write(data, cap);
 		break;
-
-	case BOX_HDLR: {
-		n = mp4_hdlr_write(data);
-		break;
-	}
 
 	case BOX_STSD_MP4A:
-		n = mp4_afmt_write(data, &m->fmt);
+		n = mp4_afmt_write(data, cap, &m->fmt);
 		break;
 
 	case BOX_ESDS: {
@@ -382,7 +394,7 @@ static inline int _mp4_boxdata(mp4write *m, const struct mp4_bbox *b)
 			.avg_brate = m->info.bitrate,
 			.conf = m->aconf,  .conflen = m->aconf_len,
 		};
-		n = mp4_esds_write(data, &ac);
+		n = mp4_esds_write(data, cap, &ac);
 		break;
 	}
 
@@ -455,6 +467,8 @@ static inline int _mp4_boxdata(mp4write *m, const struct mp4_bbox *b)
 		}
 	}
 
+	if (b->flags & MP4_F_FULLBOX)
+		n += sizeof(struct mp4_fullbox);
 	return n;
 }
 
@@ -533,10 +547,7 @@ static inline int mp4write_process(mp4write *m, ffstr *input, ffstr *output)
 			}
 
 			box = ffslice_end(&m->buf, 1);
-			if (b->flags & MP4_F_FULLBOX)
-				m->buf.len += mp4_fbox_write(b->type, box, n);
-			else
-				m->buf.len += mp4_box_write(b->type, box, n);
+			m->buf.len += mp4_box_write(b->type, box, n);
 
 			if (b->ctx != NULL) {
 				FF_ASSERT(m->ictx != FF_COUNT(m->ctx));
