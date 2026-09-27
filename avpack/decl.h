@@ -65,6 +65,8 @@ struct avpk_info {
 	unsigned char codec; // enum AVPK_CODEC
 	unsigned audio_bitrate, real_bitrate;
 	unsigned delay, padding;
+
+	ffstr opaque;
 };
 
 struct avpk_frame {

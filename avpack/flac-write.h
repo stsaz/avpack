@@ -4,7 +4,6 @@
 
 /*
 flacwrite_create flacwrite_close
-flacwrite_addtag
 flacwrite_pic
 flacwrite_process
 flacwrite_error
@@ -44,6 +43,7 @@ typedef struct flacwrite {
 	ffuint seektab_off;
 
 	ffuint frames_len;
+	ffuint info_seen :1;
 	ffuint fin :1;
 	ffuint outdev_seekable :1;
 } flacwrite;
@@ -63,13 +63,9 @@ static inline int flacwrite_create2(flacwrite *f, struct avpk_info *info)
 {
 	if (info->sample_float)
 		return 1;
-
-	struct flac_info i = {
-		.bits = info->sample_bits,
-		.channels = info->channels,
-		.sample_rate = info->sample_rate,
-	};
-	flacwrite_create(f, &i, info->duration);
+	if (info->opaque.len != sizeof(struct flac_info))
+		return 1;
+	flacwrite_create(f, (struct flac_info*)info->opaque.ptr, info->duration);
 	return 0;
 }
 
@@ -83,30 +79,6 @@ static inline void flacwrite_close(flacwrite *f)
 #define _FLACW_ERR(f, e) \
 	(f)->error = e,  FLACWRITE_ERROR
 
-static inline int flacwrite_addtag_name(flacwrite *f, ffstr name, ffstr val)
-{
-	if (0 != vorbistagwrite_add_name(&f->vtag, name, val))
-		return -1;
-	return 0;
-}
-
-/**
-mmtag: enum MMTAG
-Return 0 on success */
-static inline int flacwrite_addtag(flacwrite *f, ffuint mmtag, ffstr val)
-{
-	if (0 != vorbistagwrite_add(&f->vtag, mmtag, val))
-		return -1;
-	return 0;
-}
-
-static inline int flacwrite_tag_add(flacwrite *f, unsigned id, ffstr name, ffstr val)
-{
-	if (id)
-		return flacwrite_addtag(f, id, val);
-	return flacwrite_addtag_name(f, name, val);
-}
-
 /** Set picture
 Data must be valid until the header is written */
 static inline void flacwrite_pic(flacwrite *f, const struct flac_picinfo *info, const ffstr *pic)
@@ -117,6 +89,35 @@ static inline void flacwrite_pic(flacwrite *f, const struct flac_picinfo *info, 
 	if (f->picinfo.desc == NULL)
 		f->picinfo.desc = "";
 	f->picdata = *pic;
+}
+
+/**
+id: enum MMTAG
+Return 0 on success */
+static inline int flacwrite_tag_add(flacwrite *f, unsigned id, ffstr name, ffstr val)
+{
+	if (id == MMTAG_VENDOR && f->vtag.cnt) {
+		return 0; // Vendor tag is written first, next occurrence is skipped
+
+	} else if (id == MMTAG_PICTURE) {
+		struct avpk_pic pm = {
+			.mime = "",
+			.desc = "",
+		};
+		avpk_pic_read(val, &pm, &val);
+		struct flac_picinfo pi = {
+			.mime = pm.mime,
+			.desc = pm.desc,
+		};
+		flacwrite_pic(f, &pi, &val);
+		return 0;
+	}
+
+	if (name.len)
+		return vorbistagwrite_add_name(&f->vtag, name, val);
+	if (id)
+		return vorbistagwrite_add(&f->vtag, id, val);
+	return -1;
 }
 
 static inline const char* flacwrite_error(flacwrite *f)
@@ -188,6 +189,7 @@ static inline int flacwrite_process(flacwrite *f, ffstr *in, ffuint frame_sample
 		W_HDR, W_PIC, W_SEEKTAB_SPACE,
 		W_FRAMES,
 		W_SEEK0, W_INFO_WRITE, W_SEEKTAB_SEEK, W_SEEKTAB_WRITE,
+		W_DONE,
 	};
 	int r;
 
@@ -276,6 +278,10 @@ static inline int flacwrite_process(flacwrite *f, ffstr *in, ffuint frame_sample
 			if (!r)
 				return _FLACW_ERR(f, "flac_seektab_write");
 			ffstr_set(out, f->buf.ptr, r);
+			f->state = W_DONE;
+			return FLACWRITE_DATA;
+
+		case W_DONE:
 			return FLACWRITE_DONE;
 
 		default:
@@ -301,6 +307,12 @@ static inline ffuint64 flacwrite_offset(flacwrite *f)
 
 static inline int flacwrite_process2(flacwrite *f, struct avpk_frame *frame, unsigned flags, union avpk_write_result *res)
 {
+	if (!f->info_seen) {
+		FF_ASSERT(frame->len == sizeof(struct flac_info));
+		f->info_seen = 1;
+		frame->len = 0;
+	}
+
 	if (flags & AVPKW_F_LAST) {
 		if (!(flags & AVPKW_F_FLAC_INFO)
 			|| frame->len != sizeof(struct flac_info)) {
