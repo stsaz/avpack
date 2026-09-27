@@ -66,6 +66,9 @@ struct avpk_info {
 	unsigned audio_bitrate, real_bitrate;
 	unsigned delay, padding;
 
+	unsigned ogg_serial;
+	unsigned ogg_max_page_samples;
+
 	ffstr opaque;
 };
 
@@ -145,7 +148,7 @@ union avpk_write_result {
 };
 
 struct avpkw_if {
-	char ext[8]; // ext1 \0 ext2 \0
+	char ext[12]; // ext1 \0 ext2 \0
 	unsigned char format;
 	unsigned short context_size;
 	int (*create)(void *ctx, struct avpk_info *info);

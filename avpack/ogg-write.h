@@ -13,6 +13,13 @@ oggwrite_process
 #include <avpack/base/ogg.h>
 #include <ffbase/vector.h>
 
+struct oggwrite_stat {
+	ffuint64 npkts;
+	ffuint64 npages;
+	ffuint64 total_ogg;
+	ffuint64 total_payload;
+};
+
 typedef struct oggwrite {
 	ffuint state;
 	int err;
@@ -22,12 +29,7 @@ typedef struct oggwrite {
 	ffuint64 page_startpos;
 	ffuint64 page_endpos;
 
-	struct {
-		ffuint64 npkts;
-		ffuint64 npages;
-		ffuint64 total_ogg;
-		ffuint64 total_payload;
-	} stat;
+	struct oggwrite_stat stat;
 
 	ffuint continued :1;
 	ffuint done :1;
@@ -48,8 +50,7 @@ static inline int oggwrite_create(oggwrite *o, ffuint serialno, ffuint max_page_
 
 static inline int oggwrite_create2(oggwrite *o, struct avpk_info *info)
 {
-	(void)info;
-	return oggwrite_create(o, 0, 0);
+	return oggwrite_create(o, info->ogg_serial, info->ogg_max_page_samples);
 }
 
 static inline void oggwrite_close(oggwrite *o)
@@ -160,4 +161,4 @@ static inline int oggwrite_process2(oggwrite *o, struct avpk_frame *frame, unsig
 	return r;
 }
 
-AVPKW_IF_INIT(avpkw_ogg, "ogg", AVPKF_OGG, oggwrite, oggwrite_create2, oggwrite_close, NULL, oggwrite_process2);
+AVPKW_IF_INIT(avpkw_ogg, "ogg\0opus", AVPKF_OGG, oggwrite, oggwrite_create2, oggwrite_close, NULL, oggwrite_process2);
