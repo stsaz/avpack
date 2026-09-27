@@ -4,6 +4,7 @@
 /*
 id3v2_hdr_read id3v2_hdr_write
 id3v2_frame_read id3v2_frame_write
+id3v2_pic_write
 id3v2_data_decode
 */
 
@@ -241,4 +242,25 @@ static inline ffuint id3v2_frame_write(void *dst, const char *id, int encoding, 
 	}
 
 	return 10;
+}
+
+enum ID3V2_PIC_T {
+	ID3V2_PIC_COVER_FRONT = 3,
+};
+
+/** Write APIC frame body.
+"MIME" \0 TYPE[1] "DESCRIPTION" \0 DATA[]
+type: enum ID3V2_PIC_T
+Return N of bytes written. */
+static inline ffsize id3v2_pic_write(void *dst, const char *mime, const char *desc, ffuint type, ffstr data)
+{
+	if (dst == NULL)
+		return ffsz_len(mime) + 1 + 1 + ffsz_len(desc) + 1 + data.len;
+
+	char *p = dst;
+	p = ffmem_copy(p, mime, ffsz_len(mime) + 1);
+	*p++ = type;
+	p = ffmem_copy(p, desc, ffsz_len(desc) + 1);
+	p = ffmem_copy(p, data.ptr, data.len);
+	return p - (char*)dst;
 }

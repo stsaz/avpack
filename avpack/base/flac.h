@@ -385,6 +385,14 @@ static inline ffuint flac_seektab_write(void *out, ffsize cap, const struct flac
 }
 
 
+struct flac_picinfo {
+	const char *mime;
+	const char *desc;
+	ffuint mime_len, desc_len; // read-only
+	ffuint width, height; // write-only
+	ffuint bpp; // write-only
+};
+
 /* Picture block:
 type[4] // 0:Other 3:FrontCover 4:BackCover
 mime_len[4]
@@ -398,9 +406,9 @@ ncolors[4]
 data_len[4]
 data[]
 */
-/** Parse picture block and return picture data
+/** Parse picture block and return picture data and metadata.
 Return 0 on success */
-static inline int flac_meta_pic(ffstr data, ffstr *pic)
+static inline int flac_meta_pic(ffstr data, struct flac_picinfo *info, ffstr *pic)
 {
 	ffuint i = 0;
 	const char *d = data.ptr;
@@ -408,18 +416,21 @@ static inline int flac_meta_pic(ffstr data, ffstr *pic)
 		return -1;
 	i += 4;
 
-	ffuint mime_len = ffint_be_cpu32_ptr(&d[i]);
-	i += 4 + mime_len;
+	info->mime_len = ffint_be_cpu32_ptr(d + i);
+	info->mime = d + i + 4;
+	i += 4 + info->mime_len;
 	if (i > data.len)
 		return -1;
 
-	ffuint desc_len = ffint_be_cpu32_ptr(&d[i]);
-	i += 4 + desc_len;
+	info->desc_len = ffint_be_cpu32_ptr(d + i);
+	info->desc = d + i + 4;
+	i += 4 + info->desc_len;
+
 	i += 4*4;
 	if (i > data.len)
 		return -1;
 
-	ffuint n = ffint_be_cpu32_ptr(&d[i]);
+	ffuint n = ffint_be_cpu32_ptr(d + i);
 	i += 4;
 	if (i + n > data.len)
 		return -1;
@@ -427,16 +438,9 @@ static inline int flac_meta_pic(ffstr data, ffstr *pic)
 	// log("mime:%u  desc:%u  data:%u"
 		// , mime_len, desc_len, n);
 
-	ffstr_set(pic, &d[i], n);
+	ffstr_set(pic, d + i, n);
 	return 0;
 }
-
-struct flac_picinfo {
-	const char *mime;
-	const char *desc;
-	ffuint width, height;
-	ffuint bpp;
-};
 
 /** Write picture block data.
 data: if NULL: return the number of bytes needed.

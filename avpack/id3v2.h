@@ -85,54 +85,34 @@ static int _id3v2r_frame_read(struct id3v2read *d, ffstr in)
 		return -1;
 	d->body_off = r;
 
-	static const char id3v2_frame_str[][4] = {
-		"APIC", // MMTAG_PICTURE // "MIME" \0 TYPE[1] "DESCRIPTION" \0 DATA[]
-		"COM\0", // MMTAG_COMMENT
-		"COMM", // MMTAG_COMMENT
-		"PIC\0", // MMTAG_PICTURE
-		"TAL\0", // MMTAG_ALBUM
-		"TALB", // MMTAG_ALBUM
-		"TCO\0", // MMTAG_GENRE
-		"TCOM", // MMTAG_COMPOSER
-		"TCON", // MMTAG_GENRE // "Genre" | "(NN)Genre" | "(NN)" where NN is ID3v1 genre index
-		"TCOP", // MMTAG_COPYRIGHT
-		"TIT2", // MMTAG_TITLE
-		"TP1\0", // MMTAG_ARTIST
-		"TPE1", // MMTAG_ARTIST
-		"TPE2", // MMTAG_ALBUMARTIST
-		"TPUB", // MMTAG_PUBLISHER
-		"TRCK", // MMTAG_TRACKNO // "N[/TOTAL]"
-		"TRK\0", // MMTAG_TRACKNO
-		"TT2\0", // MMTAG_TITLE
-		"TYE\0", // MMTAG_DATE
-		"TYER", // MMTAG_DATE
-		"USLT", // MMTAG_LYRICS
+	static const struct {
+		char id[4];
+		ffbyte tag;
+	} id3v2_frame_tags[] = {
+		{ "APIC",  MMTAG_PICTURE }, // "MIME" \0 TYPE[1] "DESCRIPTION" \0 DATA[]
+		{ "COM\0", MMTAG_COMMENT },
+		{ "COMM",  MMTAG_COMMENT },
+		{ "PIC\0", MMTAG_PICTURE },
+		{ "TAL\0", MMTAG_ALBUM },
+		{ "TALB",  MMTAG_ALBUM },
+		{ "TCO\0", MMTAG_GENRE },
+		{ "TCOM",  MMTAG_COMPOSER },
+		{ "TCON",  MMTAG_GENRE }, // "Genre" | "(NN)Genre" | "(NN)" where NN is ID3v1 genre index
+		{ "TCOP",  MMTAG_COPYRIGHT },
+		{ "TIT2",  MMTAG_TITLE },
+		{ "TP1\0", MMTAG_ARTIST },
+		{ "TPE1",  MMTAG_ARTIST },
+		{ "TPE2",  MMTAG_ALBUMARTIST },
+		{ "TPUB",  MMTAG_PUBLISHER },
+		{ "TRCK",  MMTAG_TRACKNO }, // "N[/TOTAL]"
+		{ "TRK\0", MMTAG_TRACKNO },
+		{ "TT2\0", MMTAG_TITLE },
+		{ "TYE\0", MMTAG_DATE },
+		{ "TYER",  MMTAG_DATE },
+		{ "USLT",  MMTAG_LYRICS },
 	};
-	static const char id3v2_frame_int[] = {
-		MMTAG_PICTURE,
-		MMTAG_COMMENT,
-		MMTAG_COMMENT,
-		MMTAG_PICTURE,
-		MMTAG_ALBUM,
-		MMTAG_ALBUM,
-		MMTAG_GENRE,
-		MMTAG_COMPOSER,
-		MMTAG_GENRE,
-		MMTAG_COPYRIGHT,
-		MMTAG_TITLE,
-		MMTAG_ARTIST,
-		MMTAG_ARTIST,
-		MMTAG_ALBUMARTIST,
-		MMTAG_PUBLISHER,
-		MMTAG_TRACKNO,
-		MMTAG_TRACKNO,
-		MMTAG_TITLE,
-		MMTAG_DATE,
-		MMTAG_DATE,
-		MMTAG_LYRICS,
-	};
-	r = ffcharr_findsorted(id3v2_frame_str, FF_COUNT(id3v2_frame_str), 4, d->frame.id, 4);
-	return (r >= 0) ? id3v2_frame_int[r] : MMTAG_UNKNOWN;
+	r = ffcharr_find_sorted_padding(id3v2_frame_tags, FF_COUNT(id3v2_frame_tags), sizeof(id3v2_frame_tags[0].id), sizeof(id3v2_frame_tags[0].tag), d->frame.id, 4);
+	return (r >= 0) ? id3v2_frame_tags[r].tag : MMTAG_UNKNOWN;
 }
 
 static int _id3v2read_text_decode(struct id3v2read *d, ffstr in, ffstr *out)
@@ -328,9 +308,21 @@ static inline int id3v2read_process(struct id3v2read *d, ffstr *input, ffstr *na
 			case MMTAG_LYRICS:
 				_id3v2read_comment_parse(body, d->frame.encoding, &body);  break;
 
-			case MMTAG_PICTURE:
-				*value = body;
+			case MMTAG_PICTURE: {
+				n = _ffsz_nlen(body.ptr, body.len) + 1;
+				char *p = body.ptr + n + 1, *end = body.ptr + body.len;
+				if (n >= body.len
+					|| _ffsz_nlen(p, end - p) + 1 >= (ffsize)(end - p))
+					return _ID3V2READ_WARN(d, "invalid picture frame");
+				FF_ASSERT(8-1 <= d->body_off);
+
+				// MIME\0 TYPE[1] DESC\0 DATA -> avpkpict MIME\0 DESC\0 DATA
+				ffmem_move(body.ptr + 1, body.ptr, n);
+				p = body.ptr + 1 - 8;
+				ffmem_copy(p, "avpkpict", 8);
+				ffstr_set(value, p, end - p);
 				return -MMTAG_PICTURE;
+			}
 			}
 
 			*value = body;
@@ -456,7 +448,7 @@ Return 0 on success
 static inline int id3v2write_add(struct id3v2write *w, ffuint id, ffstr data, unsigned as_is)
 {
 	ffstr prefix = {};
-	char buf[32];
+	char buf[256];
 	int txt_enc = (!as_is) ? ID3V2_UTF8 : -1;
 
 	switch (id) {
@@ -469,8 +461,17 @@ static inline int id3v2write_add(struct id3v2write *w, ffuint id, ffstr data, un
 		break;
 
 	case MMTAG_PICTURE:
-		if (!as_is)
-			return 1; // not implemented
+		if (!as_is) {
+			struct avpk_pic pm = {
+				.mime = "",
+				.desc = "",
+			};
+			avpk_pic_read(data, &pm, &data);
+			if (id3v2_pic_write(NULL, pm.mime, pm.desc, 0, FFSTR_Z("")) > sizeof(buf))
+				return 1; // Incorrect input metadata
+			prefix.ptr = buf;
+			prefix.len = id3v2_pic_write(buf, pm.mime, pm.desc, ID3V2_PIC_COVER_FRONT, FFSTR_Z(""));
+		}
 		break;
 
 	case MMTAG_TRACKNO:

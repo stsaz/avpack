@@ -490,12 +490,34 @@ static inline int flacread_process2(flacread *f, ffstr *input, union avpk_read_r
 			switch (f->meta_type) {
 			case FLAC_TTAGS:
 				return r;
-			case FLAC_TPIC:
-				if (flac_meta_pic(*(ffstr*)&res->frame, &res->tag.value))
+			case FLAC_TPIC: {
+				ffstr s;
+				struct flac_picinfo pi = {};
+				if (flac_meta_pic(*(ffstr*)&res->frame, &pi, &s))
 					continue;
+
+				struct avpk_pic pm = {};
+				char *tmp = ffmem_alloc(pi.mime_len + 1 + pi.desc_len + 1), *p = tmp;
+				if (!tmp)
+					return _FLACR_ERR(f, "not enough memory");
+				pm.mime = p;
+				p = ffmem_copy(p, pi.mime, pi.mime_len);
+				*p++ = '\0';
+				pm.desc = p;
+				p = ffmem_copy(p, pi.desc, pi.desc_len);
+				*p++ = '\0';
+
+				// Overwrite FLAC picture meta block in-place
+				ffsize n = avpk_pic_write(NULL, &pm, FFSTR_Z(""));
+				s.ptr -= n;
+				avpk_pic_write(s.ptr, &pm, FFSTR_Z(""));
+				ffmem_free(tmp);
+
 				res->tag.id = MMTAG_PICTURE;
 				ffstr_setz(&res->tag.name, "PICTURE");
+				ffstr_set(&res->tag.value, s.ptr, n + s.len);
 				return AVPK_META;
+			}
 			}
 			continue;
 
