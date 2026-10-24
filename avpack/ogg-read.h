@@ -43,7 +43,7 @@ typedef struct oggread {
 	ffstr chunk;
 
 	ffvec pkt_data; // holds partial packet data
-	ffuint64 page_startpos, page_endpos;
+	ffuint64 page_startpos, page_endpos, page_endpos_adjusted;
 	ffuint page_num, page_counter;
 	ffuint pkt_num;
 	ffuint seg_off;
@@ -54,11 +54,14 @@ typedef struct oggread {
 	struct _oggread_seekpoint seekpt0; // first audio page
 	struct _oggread_seekpoint seekpt[2];
 	ffuint64 last_seek_off;
-	ffuint64 seek_sample;
+	ffuint64 seek_sample, page_last_endpos;
+	ffuint page_last_serial;
 
 	ffuint page_continued :1
 		, pkt_incomplete :1 // expecting continued packet on next page
 		, unrecognized_data :1
+		, info_done :1
+		, total_adjusted :1
 		, hdr_done :1
 		, eof :1
 		;
@@ -153,6 +156,14 @@ static int _oggread_page(oggread *o, ffstr page)
 	ffuint64 page_endpos = ffint_le_cpu64_ptr(h->granulepos);
 	if (page_endpos != (ffuint64)-1)
 		o->page_endpos = page_endpos;
+
+	o->page_endpos_adjusted = o->page_endpos;
+	if (o->total_adjusted) {
+		if (o->page_startpos != 0 && o->page_startpos != ~0ULL)
+			o->page_startpos -= o->seekpt0.sample;
+		if (o->page_endpos_adjusted != 0 && o->page_endpos_adjusted != ~0ULL)
+			o->page_endpos_adjusted -= o->seekpt0.sample;
+	}
 
 	ffuint64 page_off = o->off - ffstream_used(&o->stream);
 	_oggread_log(o, "page #%u/%xu  end-pos:%D  packets:%u  flags:%xu  size:%u  offset:%xU"
@@ -407,8 +418,10 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 			}
 
 			ffuint64 gpos = ffint_le_cpu64_ptr(h->granulepos);
-			if (gpos != (ffuint64)-1)
-				o->info.total_samples = gpos;
+			if (gpos != (ffuint64)-1) {
+				o->page_last_endpos = gpos;
+				o->page_last_serial = ffint_le_cpu32_ptr(h->serial);
+			}
 			_oggread_log(o, "page#%u  endpos:%U"
 				, ffint_le_cpu32_ptr(h->number), gpos);
 			ffstream_consume(&o->stream, o->chunk.len);
@@ -476,15 +489,9 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 				_oggread_log(o, "unrecognized data before OGG page header");
 			}
 
-			o->info.serial = ffint_le_cpu32_ptr(h->serial);
-			if (!o->hdr_done && ffint_le_cpu64_ptr(h->granulepos) != 0) {
-				o->hdr_done = 1;
-				// o->seekpt0.sample = ;
-				o->seekpt0.off = o->off - ffstream_used(&o->stream);
-				// o->info.total_samples -= granulepos;
-			}
 			o->gather_size = r;
 			o->state = R_GATHER;  o->next_state = R_FULLHDR;
+			o->info.serial = ffint_le_cpu32_ptr(h->serial);
 			continue;
 
 		case R_FULLHDR:
@@ -494,6 +501,44 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 
 		case R_PAGE:
 			_oggread_page(o, o->chunk);
+
+			if (!o->info_done && o->total_size == ~0ULL) {
+				o->info_done = 1;
+
+			} else if (!o->info_done) {
+				// Seeking is available.  Get the end-pos of the first data page to determine total length.
+				if (o->page_endpos == 0) {
+					ffstream_consume(&o->stream, o->gather_size);
+					o->state = R_HDR;
+					continue; // Fast-forward to the first data page
+				}
+
+				o->info_done = 1;
+				// seekpt0.sample == 0
+				o->seekpt0.off = o->off - ffstream_used(&o->stream);
+
+				o->info.total_samples = o->page_last_endpos;
+				if (o->page_endpos > 96000) {
+					if (o->info.serial == o->page_last_serial) {
+						// Assume our stream is just a fragment of a single larger stream
+						o->info.total_samples -= o->page_endpos - 1;
+						o->seekpt0.sample = o->page_endpos - 1; // start-pos of the _next_ page; _oggread_seek_adj() handles this correctly
+						o->total_adjusted = 1;
+					}
+					// Note: for a chunk of concatenated streams there's no fast way to get real total length
+				}
+
+				ffstream_reset(&o->stream);
+				o->unrecognized_data = 0;
+				o->page_counter = 0;
+				o->state = R_HDR;
+				o->off = 0;
+				return OGGREAD_SEEK; // Return to the header page
+			}
+
+			if (!o->hdr_done && o->page_endpos != 0)
+				o->hdr_done = 1;
+
 			o->seg_off = 0;
 			o->body_off = 0;
 			o->pkt_num = 1;
@@ -503,12 +548,18 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 		case R_PKT:
 			if (o->hdr_done && o->seek_sample != (ffuint64)-1) {
 				if (o->total_size == (ffuint64)-1
-					|| o->info.total_samples == 0)
+					|| o->page_last_endpos == 0)
 					return _OGGR_ERR(o, "can't seek");
 
-				o->seekpt[0] = o->seekpt0;
-				o->seekpt[1].sample = o->info.total_samples;
+				o->seekpt[0].sample = o->seekpt0.sample;
+				o->seekpt[0].off = o->seekpt0.off;
+				o->seekpt[1].sample = o->page_last_endpos;
 				o->seekpt[1].off = o->total_size;
+
+				if (o->seek_sample <= o->seekpt0.sample) {
+					o->state = R_SEEK_DONE;
+					continue; // The target is at the start of the stream
+				}
 				o->state = R_SEEK;
 				continue;
 			}
@@ -542,6 +593,8 @@ static inline const struct oggread_info* oggread_info(oggread *o)
 static inline void oggread_seek(oggread *o, ffuint64 sample)
 {
 	o->seek_sample = sample;
+	if (o->total_adjusted)
+		o->seek_sample += o->seekpt0.sample;
 }
 
 /** Get the starting position of the current page */
@@ -567,7 +620,7 @@ static inline int oggread_process2(oggread *o, ffstr *input, union avpk_read_res
 
 		res->frame.end_pos = ~0ULL;
 		if (oggread_pkt_last(o))
-			res->frame.end_pos = o->page_endpos;
+			res->frame.end_pos = o->page_endpos_adjusted;
 
 		res->frame.duration = ~0U;
 		break;
