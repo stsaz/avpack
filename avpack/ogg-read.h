@@ -62,6 +62,7 @@ typedef struct oggread {
 		, unrecognized_data :1
 		, info_done :1
 		, total_adjusted :1
+		, hdr_seen :1
 		, hdr_done :1
 		, eof :1
 		;
@@ -572,10 +573,18 @@ static inline int oggread_process(oggread *o, ffstr *input, ffstr *output)
 				ffstream_consume(&o->stream, o->gather_size);
 				o->state = R_HDR;
 				break;
-			case OGGREAD_HEADER:
+
 			case OGGREAD_DATA:
+				if (!o->hdr_seen || !o->hdr_done)
+					return _OGGR_ERR(o, "no OGG header found");
+				return OGGREAD_DATA;
+
+			case OGGREAD_HEADER:
+				o->hdr_seen = 1;
+				return OGGREAD_HEADER;
+
 			case OGGREAD_ERROR:
-				return r;
+				return OGGREAD_ERROR;
 			}
 			continue;
 		}
@@ -627,6 +636,11 @@ static inline int oggread_process2(oggread *o, ffstr *input, union avpk_read_res
 
 	case AVPK_SEEK:
 		res->seek_offset = o->off;
+		break;
+
+	case AVPK_ERROR:
+		res->error.message = o->err;
+		res->error.offset = o->off;
 		break;
 	}
 	return r;
