@@ -24,6 +24,8 @@ fLaC (HDR STREAMINFO) [HDR BLOCK]... (FRAME_HDR SUBFRAME... FRAME_FOOTER)...
 #include <ffbase/stream.h>
 #include <ffbase/vector.h>
 
+#define FLACREAD_SCAN_MAX  (1*1024*1024)
+
 typedef void (*flac_log_t)(void *udata, const char *fmt, va_list va);
 
 typedef struct flacread {
@@ -284,7 +286,6 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 		I_SEEK_OFF, I_SEEK_FRAME,
 		I_GATHER, I_GATHER_SOME,
 	};
-	const ffuint MAX_NOFRAME = 100 * 1024*1024;
 	int r;
 
 	ffstr empty = {};
@@ -300,6 +301,9 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 			case -0xbad:
 				return FLACREAD_ERROR;
 			case -0xfeed:
+				if (f->off >= FLACREAD_SCAN_MAX)
+					return _FLACR_ERR(f, "header scan limit reached");
+
 				return FLACREAD_MORE;
 			}
 
@@ -382,7 +386,7 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 			if (r == -0xfeed || r == -0xfeed2) {
 				if (!f->fin) {
 
-					if (f->gather > MAX_NOFRAME)
+					if (f->gather > FLACREAD_SCAN_MAX)
 						return _FLACR_ERR(f, "can't find frame");
 
 					if (f->chunk.len >= f->gather)
@@ -426,7 +430,7 @@ static inline int flacread_process(flacread *f, ffstr *input, ffstr *output)
 			if (r == -0xfeed || r == -0xfeed2) {
 				if (!f->fin) {
 
-					if (f->gather > MAX_NOFRAME)
+					if (f->gather > FLACREAD_SCAN_MAX)
 						return _FLACR_ERR(f, "can't find frame");
 
 					if (f->chunk.len >= f->gather)
