@@ -17,6 +17,7 @@ aacadts_find
 #include <avpack/base/adts.h>
 #include <ffbase/stream.h>
 
+#define AACREAD_SCAN_MAX  (1*1024*1024)
 
 enum AACREAD_R {
 	AACREAD_MORE = AVPK_MORE,
@@ -42,7 +43,7 @@ typedef struct aacread {
 	ffuint state, nextstate;
 	ffuint gather_size;
 	const char *error;
-	ffuint64 pos, seek, size, duration, off;
+	ffuint64 pos, seek, size, duration, off, frame_off;
 	ffuint frlen;
 	ffstream stream;
 	ffstr chunk;
@@ -151,6 +152,7 @@ static int _aacread_hdr_find(aacread *a, ffstr *input, ffstr *out)
 	}
 
 	ffstream_consume(&a->stream, pos);
+	a->frame_off = a->off - ffstream_used(&a->stream);
 	ffstr_shift(&chunk, pos);
 	*out = chunk;
 	a->frlen = h.framelen;
@@ -163,6 +165,7 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 	enum {
 		R_HDR_FIND, R_HDR2, R_HDR, R_CRC, R_DATA, R_FR,
 		R_GATHER,
+		R_DONE,
 		R_SEEK = 10,
 	};
 	int r;
@@ -174,16 +177,28 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 			r = ffstream_gather(&a->stream, *input, a->gather_size, &a->chunk);
 			ffstr_shift(input, r);
 			a->off += r;
-			if (a->chunk.len < a->gather_size)
+			if (a->chunk.len < a->gather_size) {
+				if (a->size && a->off >= a->size && a->info.sample_rate)
+					return AVPK_FIN;
 				return AACREAD_MORE;
+			}
 			a->chunk.len = a->gather_size;
 			a->state = a->nextstate;
 			continue;
 
 		case R_HDR_FIND:
 			r = _aacread_hdr_find(a, input, &a->chunk);
-			if (r == 0xfeed)
+			if (r == 0xfeed) {
+				if (a->size && a->off >= a->size && a->info.sample_rate)
+					return AVPK_FIN;
+
+				if (a->off >= a->frame_off + AACREAD_SCAN_MAX) {
+					a->state = R_DONE;
+					a->error = "frame scan limit reached";
+					return (!a->info.sample_rate) ? AVPK_ERROR : AVPK_WARNING;
+				}
 				return AACREAD_MORE;
+			}
 
 			a->state = R_GATHER,  a->nextstate = R_HDR2,  a->gather_size = a->frlen + 7;
 			continue;
@@ -248,7 +263,11 @@ static inline int aacread_process(aacread *a, ffstr *input, ffstr *output)
 			ffstream_reset(&a->stream);
 			a->state = R_HDR_FIND;
 			a->off = a->pos * a->size / a->duration;
+			a->frame_off = a->off;
 			return AACREAD_SEEK;
+
+		case R_DONE:
+			return AVPK_FIN;
 		}
 	}
 }
