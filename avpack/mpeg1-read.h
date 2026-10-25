@@ -19,6 +19,8 @@ mpeg1read_cursample
 #include <ffbase/string.h>
 #include <ffbase/stream.h>
 
+#define MPEG1READ_SCAN_MAX  (1*1024*1024)
+
 struct mpeg1read_info {
 	ffuint layer; // 1..3
 	ffuint sample_rate;
@@ -190,6 +192,7 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 		R_HDR_FIND, R_HDR2,
 		R_HDR,
 		R_FRAME, R_FRAME_NEXT,
+		R_DONE,
 		R_GATHER,
 	};
 	int r;
@@ -202,15 +205,28 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 			r = ffstream_gather(&m->stream, *input, m->gather_size, &m->chunk);
 			ffstr_shift(input, r);
 			m->off += r;
-			if (m->chunk.len < m->gather_size)
+			if (m->chunk.len < m->gather_size) {
+				if (m->total_size && m->off >= m->total_size && m->info.sample_rate)
+					return AVPK_FIN;
 				return MPEG1READ_MORE;
+			}
 			m->state = m->nextstate;
 			continue;
 
 		case R_HDR_FIND:
 			r = _mpeg1read_hdr_find(m, input, &m->chunk);
-			if (r == 0xfeed)
+			if (r == 0xfeed) {
+				if (m->total_size && m->off >= m->total_size && m->info.sample_rate)
+					return AVPK_FIN;
+
+				if (m->off >= m->frame_off + MPEG1READ_SCAN_MAX) {
+					m->state = R_DONE;
+					m->error = "frame scan limit reached";
+					return (!m->info.sample_rate) ? AVPK_ERROR : AVPK_WARNING;
+				}
+
 				return MPEG1READ_MORE;
+			}
 
 			if (m->unrecognized_data) {
 				m->unrecognized_data = 0;
@@ -259,6 +275,7 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 				m->cur_sample = m->seek_sample;
 				m->seek_sample = (ffuint64)-1;
 				ffstream_reset(&m->stream);
+				m->frame_off = off;
 				m->state = R_HDR_FIND;
 				return MPEG1READ_SEEK;
 			}
@@ -287,6 +304,9 @@ static inline int mpeg1read_process(mpeg1read *m, ffstr *input, ffstr *output)
 			m->cur_sample += mpeg1_samples(m->prev_hdr);
 			m->state = R_GATHER,  m->nextstate = R_HDR,  m->gather_size = 4;
 			continue;
+
+		case R_DONE:
+			return AVPK_FIN;
 		}
 	}
 	// unreachable
