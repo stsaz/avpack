@@ -12,6 +12,12 @@ static inline int avpk_format_detect(const void *data, ffsize len)
 {
 	const ffbyte *d = data;
 
+	if (len >= 4 && mpeg1_valid(d)) {
+		unsigned n = 4 + mpeg1_size(d);
+		if (len >= n + 4 && mpeg1_valid(d + n))
+			return AVPKF_MP3;
+	}
+
 	if (len >= 189) {
 		// byte sync // 0x47
 		if (d[0] == 0x47
@@ -110,11 +116,6 @@ static inline int avpk_format_detect(const void *data, ffsize len)
 		// byte id[4] // 1a45dfa3
 		if (!memcmp(d, "\x1a\x45\xdf\xa3", 4))
 			return AVPKF_MKV;
-	}
-
-	if (len >= 4) {
-		if (mpeg1_valid(d))
-			return AVPKF_MP3;
 	}
 
 	return 0;
