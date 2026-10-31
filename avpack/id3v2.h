@@ -62,6 +62,7 @@ enum ID3V2READ_R {
 
 #define id3v2read_size(d)  (d)->hdr.size
 #define id3v2read_version(d)  (d)->hdr.version
+#define id3v2read_frame_flags(d)  (d)->frame.flags
 
 #define _ID3V2READ_ERR(d, e) \
 	(d)->error = (e),  ID3V2READ_ERROR

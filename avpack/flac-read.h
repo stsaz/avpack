@@ -573,4 +573,7 @@ static inline const struct flac_info* flacread_info(flacread *f)
 
 #define flacread_samples(f)  ((f)->frame.samples)
 
+/** FLACREAD_META_BLOCK: is this the last header block */
+#define flacread_last_hdr_block(f)  ((f)->last_hdr_block)
+
 AVPKR_IF_INIT(avpk_flac, "flac", AVPKF_FLAC, flacread, flacread_open2, flacread_process2, flacread_seek, flacread_close);

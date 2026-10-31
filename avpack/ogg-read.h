@@ -625,6 +625,12 @@ static inline void oggread_seek(oggread *o, ffuint64 sample)
 /** Get the starting position of the current page */
 #define oggread_page_pos(o)  ((o)->page_startpos)
 
+/** OGGREAD_HEADER: get the whole page */
+#define oggread_page_data(o)  ((o)->chunk)
+
+/** OGGREAD_HEADER: get current page counter (starting at 1) */
+#define oggread_page_counter(o)  ((o)->page_counter)
+
 #define oggread_page_offset(o)  ((o)->page_off)
 #define oggread_page_num(o)  ((o)->page_num)
 #define oggread_pkt_num(o)  ((o)->pkt_num - 1)
