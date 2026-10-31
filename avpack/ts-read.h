@@ -80,13 +80,6 @@ static inline void tsread_open(tsread *t, ffuint64 total_size)
 	_tsr_pm_add_new(t, 0);
 }
 
-static inline void tsread_open2(tsread *t, struct avpk_reader_conf *conf)
-{
-	tsread_open(t, conf->total_size);
-	t->log = conf->log;
-	t->udata = conf->opaque;
-}
-
 static inline void tsread_close(tsread *t)
 {
 	struct _ffmap_item *it;
@@ -205,29 +198,6 @@ static inline int tsread_process(tsread *t, ffstr *input, ffstr *output)
 	}
 }
 
-static inline int tsread_process2(tsread *t, ffstr *input, union avpk_read_result *res)
-{
-	int r = tsread_process(t, input, (ffstr*)&res->frame);
-	switch (r) {
-	case AVPK_DATA:
-		res->frame.pos = t->cur->pos_msec;
-		res->frame.end_pos = ~0ULL;
-		res->frame.duration = ~0U;
-		break;
-
-	case AVPK_SEEK:
-		res->seek_offset = t->pkt.off;
-		break;
-
-	case AVPK_ERROR:
-	case AVPK_WARNING:
-		res->error.message = t->error;
-		res->error.offset = t->pkt.off;
-		break;
-	}
-	return r;
-}
-
 static inline const struct _tsr_pm* tsread_info(tsread *t)
 {
 	return t->cur;
@@ -236,5 +206,3 @@ static inline const struct _tsr_pm* tsread_info(tsread *t)
 #define tsread_pos_msec(t)  ((t)->cur->pos_msec)
 
 #define tsread_offset(t)  ((t)->pkt.off)
-
-AVPKR_IF_INIT(avpk_ts, "ts", AVPKF_TS, tsread, tsread_open2, tsread_process2, NULL, tsread_close);
